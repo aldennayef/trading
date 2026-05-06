@@ -1,6 +1,7 @@
 """LLM Analyzer — Analisis sinyal trading dengan LLM (OpenAI-compatible)."""
 import json
 import logging
+import re
 
 import aiohttp
 
@@ -16,6 +17,44 @@ SYSTEM_PROMPT = (
     "Respond with ONLY a valid JSON object: "
     '{"confidence": <0-100>, "reason": "<brief reason in 1-2 sentences>"}'
 )
+
+
+def _extract_json(text: str) -> dict:
+    """Extract JSON dari response LLM, bahkan jika ada teks tambahan."""
+    # 1. Coba langsung parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Handle markdown code blocks: ```json ... ``` atau ``` ... ```
+    code_block = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if code_block:
+        try:
+            return json.loads(code_block.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Cari JSON object {...} di dalam teks
+    brace_match = re.search(r"\{[^{}]*\}", text)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group())
+        except json.JSONDecodeError:
+            pass
+
+    # 4. Fallback: cari angka confidence dan teks reason manual
+    conf_match = re.search(r"confidence[\w\"'\s:=]+?(\d+)", text, re.IGNORECASE)
+    if not conf_match:
+        conf_match = re.search(r"(\d+)\s*[/%]?\s*(?:confidence|confident)", text, re.IGNORECASE)
+    reason_match = re.search(r"reason[\"'\s:=]+[\"']?(.+?)[\"'\n]", text, re.IGNORECASE)
+    if conf_match:
+        return {
+            "confidence": int(conf_match.group(1)),
+            "reason": reason_match.group(1) if reason_match else "",
+        }
+
+    raise ValueError(f"Cannot extract JSON from LLM response: {text[:200]}")
 
 
 def _build_prompt(signal: dict) -> str:
@@ -126,12 +165,7 @@ async def analyze_with_llm(signal: dict) -> tuple[float, str] | None:
 
                 data = await resp.json()
                 content = data["choices"][0]["message"]["content"].strip()
-
-                # Parse JSON dari response (handle markdown code blocks)
-                if content.startswith("```"):
-                    content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-                result = json.loads(content)
+                result = _extract_json(content)
                 llm_confidence = float(result.get("confidence", 0))
                 reason = str(result.get("reason", ""))
 
@@ -149,8 +183,8 @@ async def analyze_with_llm(signal: dict) -> tuple[float, str] | None:
                 )
                 return boost, reason
 
-    except json.JSONDecodeError:
-        logger.warning("LLM returned invalid JSON")
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("LLM returned invalid JSON: %s", exc)
         return None
     except (KeyError, IndexError, TypeError) as exc:
         logger.warning("LLM response parsing error: %s", exc)
