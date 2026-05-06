@@ -107,6 +107,11 @@ async def initialize_strategies() -> None:
         for price in closes:
             strategy.add_price(price)
 
+        # Bootstrap prev_ma state so MA crossover detection works
+        # immediately on the first WebSocket candle.
+        if strategy.ready:
+            strategy.evaluate()
+
         strategies[pair_upper] = strategy
         logger.info(
             "%s: loaded %d candles, ready=%s",
