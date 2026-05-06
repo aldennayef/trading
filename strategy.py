@@ -654,10 +654,8 @@ class TradingStrategy:
             vol_ratio = current_vol / avg_vol
             if vol_ratio >= 2.0:
                 buy_scores["volume"] = 1.0
-            elif vol_ratio >= VOLUME_SPIKE_MULTIPLIER:
-                buy_scores["volume"] = self._linear_score(vol_ratio, 1.0, 2.0)
             else:
-                buy_scores["volume"] = self._linear_score(vol_ratio, 0.5, VOLUME_SPIKE_MULTIPLIER)
+                buy_scores["volume"] = self._linear_score(vol_ratio, 0.5, 2.0)
             if vol_spike:
                 buy_reasons.append(
                     f"Volume Spike ({current_vol:.2f} >= {VOLUME_SPIKE_MULTIPLIER}x avg)"
@@ -776,10 +774,8 @@ class TradingStrategy:
             vol_ratio = current_vol / avg_vol
             if vol_ratio >= 2.0:
                 sell_scores["volume"] = 1.0
-            elif vol_ratio >= VOLUME_SPIKE_MULTIPLIER:
-                sell_scores["volume"] = self._linear_score(vol_ratio, 1.0, 2.0)
             else:
-                sell_scores["volume"] = self._linear_score(vol_ratio, 0.5, VOLUME_SPIKE_MULTIPLIER)
+                sell_scores["volume"] = self._linear_score(vol_ratio, 0.5, 2.0)
             if vol_spike:
                 sell_reasons.append(
                     f"Volume Spike ({current_vol:.2f} >= {VOLUME_SPIKE_MULTIPLIER}x avg)"
