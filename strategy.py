@@ -171,12 +171,12 @@ class TradingStrategy:
         Returns:
             (current_volume, avg_volume, is_volume_spike)
         """
-        if len(self.volumes) < VOLUME_MA_PERIOD:
+        if len(self.volumes) < VOLUME_MA_PERIOD + 1:
             return None, None, False
 
         vols = list(self.volumes)
         current_vol = vols[-1]
-        avg_vol = sum(vols[-VOLUME_MA_PERIOD:]) / VOLUME_MA_PERIOD
+        avg_vol = sum(vols[-VOLUME_MA_PERIOD - 1:-1]) / VOLUME_MA_PERIOD
 
         if avg_vol == 0:
             return current_vol, avg_vol, False
@@ -242,16 +242,17 @@ class TradingStrategy:
             buy_score += 1
             reasons.append("Harga di atas MA Short (Bullish)")
 
-        # 4. MACD bullish crossover (histogram dari negatif ke positif)
+        # 4. MACD: crossover lebih kuat, fallback ke line>signal jika tidak ada crossover
+        macd_buy_counted = False
         if macd_histogram is not None and self.prev_macd_histogram is not None:
             if macd_histogram > 0 and self.prev_macd_histogram <= 0:
                 buy_score += 1
                 reasons.append(
                     f"MACD Bullish Cross (Hist: {macd_histogram:.4f})"
                 )
+                macd_buy_counted = True
 
-        # 5. MACD line di atas signal line (momentum bullish)
-        if macd_line is not None and macd_signal is not None:
+        if not macd_buy_counted and macd_line is not None and macd_signal is not None:
             if macd_line > macd_signal:
                 buy_score += 1
                 reasons.append("MACD Line > Signal (Momentum Bullish)")
@@ -287,16 +288,17 @@ class TradingStrategy:
                     f"MA Cross Down (MA{MA_SHORT_PERIOD} < MA{MA_LONG_PERIOD})"
                 )
 
-        # 3. MACD bearish crossover (histogram dari positif ke negatif)
+        # 3. MACD: crossover lebih kuat, fallback ke line<signal jika tidak ada crossover
+        macd_sell_counted = False
         if macd_histogram is not None and self.prev_macd_histogram is not None:
             if macd_histogram < 0 and self.prev_macd_histogram >= 0:
                 sell_score += 1
                 sell_reasons.append(
                     f"MACD Bearish Cross (Hist: {macd_histogram:.4f})"
                 )
+                macd_sell_counted = True
 
-        # 4. MACD line di bawah signal line (momentum bearish)
-        if macd_line is not None and macd_signal is not None:
+        if not macd_sell_counted and macd_line is not None and macd_signal is not None:
             if macd_line < macd_signal:
                 sell_score += 1
                 sell_reasons.append("MACD Line < Signal (Momentum Bearish)")
