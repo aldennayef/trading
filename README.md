@@ -71,8 +71,6 @@ Binance WebSocket (kline: high, low, close, volume)
 ## Instalasi
 
 ```bash
-cd crypto_trading_bot
-
 # Install dependencies
 pip install -r requirements.txt
 
@@ -91,43 +89,47 @@ cp .env.example .env
 
 ## Menjalankan Bot
 
-### Linux / macOS
-```bash
-# Cara 1: Load dari file .env
-export $(cat .env | xargs)
-python main.py
+Bot **otomatis membaca file `.env`** (via `python-dotenv`), jadi cukup:
 
-# Cara 2: Set manual
-export TELEGRAM_BOT_TOKEN="your_token"
-export TELEGRAM_CHAT_ID="your_chat_id"
-python main.py
-```
-
-### Windows (PowerShell)
-```powershell
-$env:TELEGRAM_BOT_TOKEN="your_token"
-$env:TELEGRAM_CHAT_ID="your_chat_id"
-py main.py
-```
-
-### Dengan LLM (opsional)
 ```bash
 # Linux/macOS
-export LLM_API_KEY="sk-your-openai-key"
-export LLM_BASE_URL="https://api.openai.com/v1"  # atau Groq, Together, dll
-export LLM_MODEL="gpt-4o-mini"
 python main.py
 
-# Windows PowerShell
-$env:LLM_API_KEY="sk-your-openai-key"
-$env:LLM_BASE_URL="https://api.openai.com/v1"
-$env:LLM_MODEL="gpt-4o-mini"
+# Windows
 py main.py
 ```
 
-Bot akan otomatis mendeteksi apakah `LLM_API_KEY` diisi:
+Tidak perlu `export` atau `$env:` — semua konfigurasi dibaca dari file `.env`.
+
+### Contoh File `.env`
+
+```env
+# === Telegram Bot ===
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_CHAT_ID=987654321
+
+# === Trading Settings ===
+TP_PERCENT=3.0
+CL_PERCENT=2.0
+
+# === Logging ===
+LOG_LEVEL=INFO
+
+# === Confidence ===
+MIN_CONFIDENCE=97.0
+
+# === LLM (opsional — kosongkan jika tidak pakai) ===
+LLM_API_KEY=
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+```
+
+### LLM Auto-Detect
+
+Bot otomatis mendeteksi apakah `LLM_API_KEY` diisi:
 - **Diisi** → LLM aktif, memberikan boost confidence hingga +10%
 - **Kosong** → Bot tetap jalan normal tanpa LLM
+- **Error** → LLM otomatis di-skip, sinyal tetap dikirim berdasarkan teknikal
 
 ## Konfigurasi
 
@@ -182,9 +184,11 @@ Bot menggunakan OpenAI-compatible API, sehingga bisa digunakan dengan:
 | Provider | Base URL | Model |
 |----------|----------|-------|
 | **OpenAI** | `https://api.openai.com/v1` | `gpt-4o-mini`, `gpt-4o` |
+| **DeepSeek** | `https://api.deepseek.com/v1` | `deepseek-v4-flash` |
 | **Groq** | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
 | **Together AI** | `https://api.together.xyz/v1` | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` |
 | **Ollama (lokal)** | `http://localhost:11434/v1` | model lokal apapun |
+| **Custom** | URL provider kamu | model apapun yang OpenAI-compatible |
 
 ## Contoh Notifikasi
 
@@ -205,9 +209,10 @@ Bot menggunakan OpenAI-compatible API, sehingga bisa digunakan dengan:
   • Volume Spike (1250.50 >= 1.5x avg)
   • Harga di atas MA Short (Bullish)
 ━━━━━━━━━━━━━━━━━━
-🎯 Confidence: 98.5%
+🎯 Confidence: 98.5% (min 97%)
+🤖 LLM: Aktif
 🤖 LLM Boost: +3.2%
-🤖 LLM: Strong bullish momentum confirmed by multiple indicators
+🤖 Analisis: Strong bullish momentum confirmed
   █████ ema_200: 100%
   █████ adx: 100%
   █████ stoch_rsi: 100%
