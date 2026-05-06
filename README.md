@@ -81,15 +81,19 @@ cp .env.example .env
 
 ## Menjalankan Bot
 
+### Linux / macOS
 ```bash
-# Load environment variables
+# Cara 1: Load dari file .env
 export $(cat .env | xargs)
+python main.py
 
-# Jalankan bot
+# Cara 2: Set manual
+export TELEGRAM_BOT_TOKEN="your_token"
+export TELEGRAM_CHAT_ID="your_chat_id"
 python main.py
 ```
 
-Windows (PowerShell):
+### Windows (PowerShell)
 ```powershell
 $env:TELEGRAM_BOT_TOKEN="your_token"
 $env:TELEGRAM_CHAT_ID="your_chat_id"
