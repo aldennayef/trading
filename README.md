@@ -40,20 +40,21 @@ Binance WebSocket (kline: high, low, close, volume)
        │                      │     Setiap indikator → skor 0.0-1.0
        │                      │     Skor × bobot → confidence score
        │                      │
-       │                      ├─→ Confidence ≥ 87%? (pre-threshold)
+       │                      ├─→ Confidence ≥ pre-threshold? (MIN_CONFIDENCE - 10%)
        │                      │     │
        │                      │     ├─→ Ya + LLM aktif → Kirim ke LLM
        │                      │     │     LLM return boost 0-10%
        │                      │     │     Final confidence = tech + LLM boost
+       │                      │     │     (LLM error → auto-skip)
        │                      │     │
        │                      │     └─→ Tanpa LLM → Langsung cek threshold
        │                      │
-       │                      ├─→ Final confidence ≥ 97%?
+       │                      ├─→ Final confidence ≥ MIN_CONFIDENCE?
        │                      │     │
        │                      │     ├─→ BUY → ATR TP/CL → Notif + Posisi
        │                      │     └─→ SELL → Kirim peringatan
        │                      │
-       │                      └─→ < 97% → Skip (log debug)
+       │                      └─→ < MIN_CONFIDENCE → Skip (log debug)
        │
        └─→ Price Update → Position Manager
                               │
@@ -172,10 +173,14 @@ Setiap indikator memberikan skor **0.0 sampai 1.0** dikalikan **bobot**-nya:
 - Semua skor 1.0 + LLM boost 10% → 110% (capped) → dikirim
 
 ### LLM Boost:
-- Hanya dipanggil jika confidence ≥ 87% (pre-threshold) dan < 97%
+- Pre-threshold = `MIN_CONFIDENCE - 10%` (otomatis dihitung)
+  - Contoh: `MIN_CONFIDENCE=97` → pre-threshold = 87%
+  - Contoh: `MIN_CONFIDENCE=85` → pre-threshold = 75%
+- LLM hanya dipanggil jika confidence ≥ pre-threshold dan < `MIN_CONFIDENCE`
 - LLM menganalisis semua indikator dan memberikan confidence 0-100
 - Boost = LLM confidence × 10% (max +10%)
 - Final = tech confidence + LLM boost
+- Jika LLM error → otomatis di-skip, sinyal tetap dikirim berdasarkan teknikal saja
 
 ## Provider LLM yang Didukung
 
