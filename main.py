@@ -6,8 +6,14 @@ Confidence-based scoring (10 indikator) + LLM opsional.
 """
 import asyncio
 import logging
+import os
 import sys
 import time
+
+from dotenv import load_dotenv
+
+# Auto-load .env sebelum import config
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from binance_ws import connect_websocket, fetch_initial_klines
 from config import (
