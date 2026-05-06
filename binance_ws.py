@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 async def fetch_initial_klines(
     pair: str, interval: str = KLINE_INTERVAL, limit: int = KLINE_BUFFER_SIZE
-) -> list[tuple[float, float]]:
+) -> list[tuple[float, float, float, float]]:
     """
     Fetch data kline historis dari REST API untuk mengisi buffer awal.
 
     Returns:
-        List of (close_price, volume) tuples.
+        List of (high, low, close, volume) tuples.
     """
     url = (
         f"{BINANCE_REST_BASE}/api/v3/klines"
@@ -33,11 +33,10 @@ async def fetch_initial_klines(
                     logger.error("Gagal fetch klines %s: %d", pair, resp.status)
                     return []
                 data = await resp.json()
-                # Exclude the last entry (current unclosed candle) to avoid
-                # duplicating it when it later closes via WebSocket.
-                # candle[4] = close price, candle[5] = volume
+                # Exclude the last entry (current unclosed candle)
+                # candle[2]=high, candle[3]=low, candle[4]=close, candle[5]=volume
                 klines = [
-                    (float(candle[4]), float(candle[5]))
+                    (float(candle[2]), float(candle[3]), float(candle[4]), float(candle[5]))
                     for candle in data[:-1]
                 ]
                 logger.info("Fetched %d klines for %s", len(klines), pair.upper())
@@ -63,8 +62,8 @@ async def connect_websocket(
 
     Args:
         pairs: List pair yang dimonitor.
-        on_kline_close: Callback async saat candle close (pair, close_price, volume).
-        on_price_update: Callback async saat ada update harga (pair, price).
+        on_kline_close: Callback async (pair, high, low, close_price, volume).
+        on_price_update: Callback async (pair, price).
     """
     url = build_stream_url(pairs)
     retry_delay = 5
@@ -75,7 +74,7 @@ async def connect_websocket(
                 logger.info("Connecting to Binance WebSocket...")
                 async with session.ws_connect(url, heartbeat=30) as ws:
                     logger.info("Connected to Binance WebSocket")
-                    retry_delay = 5  # Reset retry delay on success
+                    retry_delay = 5
 
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
@@ -86,17 +85,19 @@ async def connect_websocket(
                                 continue
 
                             kline = stream_data["k"]
-                            pair = kline["s"]  # e.g. "BTCUSDT"
+                            pair = kline["s"]
+                            high = float(kline["h"])
+                            low = float(kline["l"])
                             close_price = float(kline["c"])
                             volume = float(kline["v"])
-                            is_closed = kline["x"]  # True jika candle sudah close
+                            is_closed = kline["x"]
 
-                            # Update harga real-time (untuk cek TP/CL)
                             await on_price_update(pair, close_price)
 
-                            # Jika candle sudah close, proses untuk indikator
                             if is_closed:
-                                await on_kline_close(pair, close_price, volume)
+                                await on_kline_close(
+                                    pair, high, low, close_price, volume
+                                )
 
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             logger.error("WebSocket error: %s", ws.exception())

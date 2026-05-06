@@ -104,10 +104,22 @@ class PositionManager:
     def has_position(self, pair: str) -> bool:
         return pair.upper() in self.positions
 
-    def open_position(self, pair: str, entry_price: float) -> Position:
-        """Buka posisi baru."""
+    def open_position(
+        self,
+        pair: str,
+        entry_price: float,
+        tp_percent: float = TP_PERCENT,
+        cl_percent: float = CL_PERCENT,
+    ) -> Position:
+        """Buka posisi baru dengan TP/CL yang bisa di-override (ATR-based)."""
         pair = pair.upper()
-        pos = Position(pair=pair, entry_price=entry_price, signal_time=time.time())
+        pos = Position(
+            pair=pair,
+            entry_price=entry_price,
+            signal_time=time.time(),
+            tp_percent=tp_percent,
+            cl_percent=cl_percent,
+        )
         self.positions[pair] = pos
         self._save()
         logger.info("Opened position %s @ %.8f", pair, entry_price)

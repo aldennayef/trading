@@ -55,6 +55,30 @@ async def notify_buy_signal(signal: dict, tp_price: float, cl_price: float) -> b
     reasons = "\n".join(f"  • {html.escape(r)}" for r in signal["reasons"])
     score = signal.get("score", len(signal["reasons"]))
 
+    # Fibonacci info
+    fib_info = ""
+    if signal.get("fib_data") is not None:
+        fib = signal["fib_data"]
+        fib_info = (
+            f"📐 Fib: {_format_price(fib['swing_low'])} - "
+            f"{_format_price(fib['swing_high'])}\n"
+            f"📐 Level: {signal.get('fib_ratio', 0):.3f} = "
+            f"{_format_price(signal.get('fib_level', 0))}\n"
+        )
+
+    # Stochastic RSI info
+    stoch_info = ""
+    if signal.get("stoch_k") is not None:
+        stoch_info = (
+            f"📊 Stoch RSI: %K {signal['stoch_k']:.1f} | "
+            f"%D {signal['stoch_d']:.1f}\n"
+        )
+
+    # EMA 200 info
+    ema_info = ""
+    if signal.get("ema_200") is not None:
+        ema_info = f"📊 EMA 200: {_format_price(signal['ema_200'])}\n"
+
     # MACD info
     macd_info = ""
     if signal.get("macd_line") is not None:
@@ -81,34 +105,41 @@ async def notify_buy_signal(signal: dict, tp_price: float, cl_price: float) -> b
             vol_info += f" ({ratio:.1f}x avg)"
         vol_info += "\n"
 
-    # Fibonacci info
-    fib_info = ""
-    if signal.get("fib_data") is not None:
-        fib = signal["fib_data"]
-        fib_info = (
-            f"📐 Fib: {_format_price(fib['swing_low'])} - "
-            f"{_format_price(fib['swing_high'])}\n"
-            f"📐 Level: {signal.get('fib_ratio', 0):.3f} = "
-            f"{_format_price(signal.get('fib_level', 0))}\n"
+    # ADX info
+    adx_info = ""
+    if signal.get("adx") is not None:
+        adx_info = (
+            f"📊 ADX: {signal['adx']:.1f} | "
+            f"+DI: {signal['plus_di']:.1f} | "
+            f"-DI: {signal['minus_di']:.1f}\n"
         )
 
+    # ATR info
+    atr_info = ""
+    if signal.get("atr") is not None:
+        atr_info = f"📊 ATR: {_format_price(signal['atr'])}\n"
+
     message = (
-        f"🟢 <b>SINYAL BELI</b> (Fib + {score} konfirmasi)\n"
+        f"🟢 <b>SINYAL BELI</b> (Fib+ADX+EMA200 + {score} konfirmasi)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Entry: <b>{_format_price(signal['price'])}</b>\n"
-        f"🎯 TP: {_format_price(tp_price)}\n"
-        f"🔴 CL: {_format_price(cl_price)}\n"
+        f"🎯 TP: {_format_price(tp_price)} (ATR-based)\n"
+        f"🔴 CL: {_format_price(cl_price)} (ATR-based)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📈 Konfirmasi (Fib + {score}):\n{reasons}\n"
+        f"📈 Konfirmasi:\n{reasons}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📐 Fibonacci:\n{fib_info}"
+        f"{stoch_info}"
         f"📉 RSI: {signal['rsi']:.1f}\n"
+        f"{ema_info}"
         f"📊 MA Short: {_format_price(signal['ma_short'])}\n"
         f"📊 MA Long: {_format_price(signal['ma_long'])}\n"
         f"{macd_info}"
         f"{bb_info}"
         f"{vol_info}"
+        f"{adx_info}"
+        f"{atr_info}"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {now}"
     )
@@ -153,14 +184,6 @@ async def notify_sell_signal(signal: dict) -> bool:
     reasons = "\n".join(f"  • {html.escape(r)}" for r in signal["reasons"])
     score = signal.get("score", len(signal["reasons"]))
 
-    # MACD info
-    macd_info = ""
-    if signal.get("macd_line") is not None:
-        macd_info = (
-            f"📊 MACD: {signal['macd_line']:.4f} | "
-            f"Signal: {signal['macd_signal']:.4f}\n"
-        )
-
     # Fibonacci info
     fib_info = ""
     if signal.get("fib_data") is not None:
@@ -172,17 +195,46 @@ async def notify_sell_signal(signal: dict) -> bool:
             f"{_format_price(signal.get('fib_level', 0))}\n"
         )
 
+    # Stochastic RSI info
+    stoch_info = ""
+    if signal.get("stoch_k") is not None:
+        stoch_info = (
+            f"📊 Stoch RSI: %K {signal['stoch_k']:.1f} | "
+            f"%D {signal['stoch_d']:.1f}\n"
+        )
+
+    # MACD info
+    macd_info = ""
+    if signal.get("macd_line") is not None:
+        macd_info = (
+            f"📊 MACD: {signal['macd_line']:.4f} | "
+            f"Signal: {signal['macd_signal']:.4f}\n"
+        )
+
+    # ADX info
+    adx_info = ""
+    if signal.get("adx") is not None:
+        adx_info = f"📊 ADX: {signal['adx']:.1f}\n"
+
+    # ATR info
+    atr_info = ""
+    if signal.get("atr") is not None:
+        atr_info = f"📊 ATR: {_format_price(signal['atr'])}\n"
+
     message = (
-        f"⚠️ <b>SINYAL JUAL</b> (Fib + {score} konfirmasi)\n"
+        f"⚠️ <b>SINYAL JUAL</b> (Fib+ADX+EMA200 + {score} konfirmasi)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Harga: <b>{_format_price(signal['price'])}</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📉 Konfirmasi (Fib + {score}):\n{reasons}\n"
+        f"📉 Konfirmasi:\n{reasons}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📐 Fibonacci:\n{fib_info}"
+        f"{stoch_info}"
         f"📊 RSI: {signal['rsi']:.1f}\n"
         f"{macd_info}"
+        f"{adx_info}"
+        f"{atr_info}"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {now}"
     )
@@ -212,7 +264,14 @@ async def notify_bot_started(pairs: list[str]) -> bool:
         f"🤖 <b>Bot Trading Aktif!</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Monitoring: {pairs_str}\n"
-        f"⚙️ Strategi: Fibonacci (wajib) + RSI + MA + MACD + BB + Volume\n"
+        f"⚙️ Strategi:\n"
+        f"  📐 Fibonacci Retracement (wajib)\n"
+        f"  📊 EMA 200 (filter trend)\n"
+        f"  📊 ADX (kekuatan trend)\n"
+        f"  📊 Stochastic RSI + RSI\n"
+        f"  📊 MA Crossover + MACD\n"
+        f"  📊 Bollinger Bands + Volume\n"
+        f"  📊 ATR (TP/CL dinamis)\n"
         f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     return await send_telegram(message)

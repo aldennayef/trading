@@ -2,8 +2,8 @@
 Crypto Trading Bot - Entry Point
 
 Bot trading cryptocurrency dengan notifikasi Telegram.
-Menggunakan indikator RSI + MA Crossover + MACD + Bollinger Bands + Volume
-untuk menghasilkan sinyal BUY, Take Profit, dan Cut Loss.
+Menggunakan Fibonacci (wajib) + Stochastic RSI + ADX + ATR + EMA 200
++ RSI + MA + MACD + Bollinger Bands + Volume.
 """
 import asyncio
 import logging
@@ -11,7 +11,15 @@ import sys
 import time
 
 from binance_ws import connect_websocket, fetch_initial_klines
-from config import LOG_LEVEL, SIGNAL_COOLDOWN, TRADING_PAIRS
+from config import (
+    ATR_CL_MULTIPLIER,
+    ATR_TP_MULTIPLIER,
+    CL_PERCENT,
+    LOG_LEVEL,
+    SIGNAL_COOLDOWN,
+    TP_PERCENT,
+    TRADING_PAIRS,
+)
 from notifier import (
     notify_bot_started,
     notify_buy_signal,
@@ -37,13 +45,15 @@ position_manager = PositionManager()
 last_signal_time: dict[str, float] = {}
 
 
-async def on_kline_close(pair: str, close_price: float, volume: float) -> None:
+async def on_kline_close(
+    pair: str, high: float, low: float, close_price: float, volume: float
+) -> None:
     """Callback saat candle kline close - evaluasi sinyal."""
     strategy = strategies.get(pair)
     if strategy is None:
         return
 
-    strategy.add_price(close_price, volume)
+    strategy.add_price(close_price, volume, high=high, low=low)
 
     if not strategy.ready:
         return
@@ -60,16 +70,28 @@ async def on_kline_close(pair: str, close_price: float, volume: float) -> None:
         return
 
     if signal["signal"] == "BUY":
-        # Jangan buka posisi jika sudah ada
         if position_manager.has_position(pair):
             logger.debug("Sudah ada posisi aktif untuk %s", pair)
             return
 
-        pos = position_manager.open_position(pair, close_price)
+        # ATR-based dynamic TP/CL
+        atr = signal.get("atr")
+        if atr is not None and close_price > 0:
+            tp_pct = (atr * ATR_TP_MULTIPLIER / close_price) * 100
+            cl_pct = (atr * ATR_CL_MULTIPLIER / close_price) * 100
+        else:
+            tp_pct = TP_PERCENT
+            cl_pct = CL_PERCENT
+
+        pos = position_manager.open_position(
+            pair, close_price, tp_percent=tp_pct, cl_percent=cl_pct
+        )
         await notify_buy_signal(signal, pos.tp_price, pos.cl_price)
         last_signal_time[pair] = now
-        logger.info("BUY signal for %s @ %.8f (score: %d)",
-                     pair, close_price, signal["score"])
+        logger.info(
+            "BUY signal for %s @ %.8f (score: %d, TP: %.2f%%, CL: %.2f%%)",
+            pair, close_price, signal["score"], tp_pct, cl_pct,
+        )
 
     elif signal["signal"] == "SELL":
         await notify_sell_signal(signal)
@@ -106,11 +128,10 @@ async def initialize_strategies() -> None:
         pair_upper = pair.upper()
         strategy = TradingStrategy(pair_upper)
 
-        for close_price, volume in klines:
-            strategy.add_price(close_price, volume)
+        for high, low, close_price, volume in klines:
+            strategy.add_price(close_price, volume, high=high, low=low)
 
-        # Bootstrap prev_ma and prev_macd_histogram state so crossover
-        # detection works immediately on the first WebSocket candle.
+        # Bootstrap prev_ma and prev_macd_histogram state
         if strategy.ready:
             strategy.evaluate()
 
@@ -122,10 +143,7 @@ async def initialize_strategies() -> None:
 
 
 async def handle_telegram_commands() -> None:
-    """
-    Placeholder untuk Telegram command handler.
-    Bisa dikembangkan untuk menerima command /status, /pairs, dll.
-    """
+    """Placeholder untuk Telegram command handler."""
     pass
 
 
@@ -134,22 +152,19 @@ async def main() -> None:
     logger.info("=" * 50)
     logger.info("Crypto Trading Bot Starting...")
     logger.info("Pairs: %s", ", ".join(p.upper() for p in TRADING_PAIRS))
-    logger.info("Strategy: RSI + MA + MACD + Bollinger Bands + Volume")
+    logger.info(
+        "Strategy: Fibonacci + StochRSI + ADX + ATR + EMA200 + RSI + MA + MACD + BB + Volume"
+    )
     logger.info("=" * 50)
 
-    # Initialize strategies dengan data historis
     await initialize_strategies()
-
-    # Kirim notifikasi bot started
     await notify_bot_started(TRADING_PAIRS)
 
-    # Tampilkan posisi aktif saat startup
     active_positions = position_manager.get_status()
     if active_positions:
         logger.info("Active positions: %d", len(active_positions))
         await notify_status(active_positions)
 
-    # Jalankan WebSocket
     logger.info("Starting WebSocket connection...")
     await connect_websocket(
         pairs=TRADING_PAIRS,
