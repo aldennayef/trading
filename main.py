@@ -2,8 +2,8 @@
 Crypto Trading Bot - Entry Point
 
 Bot trading cryptocurrency dengan notifikasi Telegram.
-Menggunakan indikator RSI + Moving Average Crossover untuk
-menghasilkan sinyal BUY, Take Profit, dan Cut Loss.
+Menggunakan indikator RSI + MA Crossover + MACD + Bollinger Bands + Volume
+untuk menghasilkan sinyal BUY, Take Profit, dan Cut Loss.
 """
 import asyncio
 import logging
@@ -37,13 +37,13 @@ position_manager = PositionManager()
 last_signal_time: dict[str, float] = {}
 
 
-async def on_kline_close(pair: str, close_price: float) -> None:
+async def on_kline_close(pair: str, close_price: float, volume: float) -> None:
     """Callback saat candle kline close - evaluasi sinyal."""
     strategy = strategies.get(pair)
     if strategy is None:
         return
 
-    strategy.add_price(close_price)
+    strategy.add_price(close_price, volume)
 
     if not strategy.ready:
         return
@@ -68,12 +68,14 @@ async def on_kline_close(pair: str, close_price: float) -> None:
         pos = position_manager.open_position(pair, close_price)
         await notify_buy_signal(signal, pos.tp_price, pos.cl_price)
         last_signal_time[pair] = now
-        logger.info("BUY signal for %s @ %.8f", pair, close_price)
+        logger.info("BUY signal for %s @ %.8f (score: %d)",
+                     pair, close_price, signal["score"])
 
     elif signal["signal"] == "SELL":
         await notify_sell_signal(signal)
         last_signal_time[pair] = now
-        logger.info("SELL signal for %s @ %.8f", pair, close_price)
+        logger.info("SELL signal for %s @ %.8f (score: %d)",
+                     pair, close_price, signal["score"])
 
 
 async def on_price_update(pair: str, current_price: float) -> None:
@@ -100,22 +102,22 @@ async def initialize_strategies() -> None:
     tasks = [fetch_initial_klines(pair) for pair in TRADING_PAIRS]
     results = await asyncio.gather(*tasks)
 
-    for pair, closes in zip(TRADING_PAIRS, results):
+    for pair, klines in zip(TRADING_PAIRS, results):
         pair_upper = pair.upper()
         strategy = TradingStrategy(pair_upper)
 
-        for price in closes:
-            strategy.add_price(price)
+        for close_price, volume in klines:
+            strategy.add_price(close_price, volume)
 
-        # Bootstrap prev_ma state so MA crossover detection works
-        # immediately on the first WebSocket candle.
+        # Bootstrap prev_ma and prev_macd_histogram state so crossover
+        # detection works immediately on the first WebSocket candle.
         if strategy.ready:
             strategy.evaluate()
 
         strategies[pair_upper] = strategy
         logger.info(
             "%s: loaded %d candles, ready=%s",
-            pair_upper, len(closes), strategy.ready
+            pair_upper, len(klines), strategy.ready
         )
 
 
@@ -132,6 +134,7 @@ async def main() -> None:
     logger.info("=" * 50)
     logger.info("Crypto Trading Bot Starting...")
     logger.info("Pairs: %s", ", ".join(p.upper() for p in TRADING_PAIRS))
+    logger.info("Strategy: RSI + MA + MACD + Bollinger Bands + Volume")
     logger.info("=" * 50)
 
     # Initialize strategies dengan data historis

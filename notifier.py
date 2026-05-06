@@ -52,19 +52,50 @@ async def notify_buy_signal(signal: dict, tp_price: float, cl_price: float) -> b
     """Kirim notifikasi sinyal BELI."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     reasons = "\n".join(f"  • {r}" for r in signal["reasons"])
+    score = signal.get("score", len(signal["reasons"]))
+
+    # MACD info
+    macd_info = ""
+    if signal.get("macd_line") is not None:
+        macd_info = (
+            f"📊 MACD: {signal['macd_line']:.4f} | "
+            f"Signal: {signal['macd_signal']:.4f} | "
+            f"Hist: {signal['macd_histogram']:.4f}\n"
+        )
+
+    # Bollinger Bands info
+    bb_info = ""
+    if signal.get("bb_upper") is not None:
+        bb_info = (
+            f"📊 BB: Upper {_format_price(signal['bb_upper'])} | "
+            f"Lower {_format_price(signal['bb_lower'])}\n"
+        )
+
+    # Volume info
+    vol_info = ""
+    if signal.get("volume") is not None and signal["volume"]:
+        vol_info = f"📊 Volume: {signal['volume']:.2f}"
+        if signal.get("volume_avg"):
+            ratio = signal["volume"] / signal["volume_avg"]
+            vol_info += f" ({ratio:.1f}x avg)"
+        vol_info += "\n"
 
     message = (
-        f"🟢 <b>SINYAL BELI</b>\n"
+        f"🟢 <b>SINYAL BELI</b> (Skor: {score})\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Entry: <b>{_format_price(signal['price'])}</b>\n"
         f"🎯 TP: {_format_price(tp_price)}\n"
         f"🔴 CL: {_format_price(cl_price)}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📈 Indikator:\n{reasons}\n"
+        f"📈 Konfirmasi ({score}):\n{reasons}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
         f"📉 RSI: {signal['rsi']:.1f}\n"
         f"📊 MA Short: {_format_price(signal['ma_short'])}\n"
         f"📊 MA Long: {_format_price(signal['ma_long'])}\n"
+        f"{macd_info}"
+        f"{bb_info}"
+        f"{vol_info}"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {now}"
     )
@@ -107,15 +138,25 @@ async def notify_sell_signal(signal: dict) -> bool:
     """Kirim notifikasi sinyal JUAL (peringatan)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     reasons = "\n".join(f"  • {r}" for r in signal["reasons"])
+    score = signal.get("score", len(signal["reasons"]))
+
+    # MACD info
+    macd_info = ""
+    if signal.get("macd_line") is not None:
+        macd_info = (
+            f"📊 MACD: {signal['macd_line']:.4f} | "
+            f"Signal: {signal['macd_signal']:.4f}\n"
+        )
 
     message = (
-        f"⚠️ <b>SINYAL JUAL</b>\n"
+        f"⚠️ <b>SINYAL JUAL</b> (Skor: {score})\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Harga: <b>{_format_price(signal['price'])}</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📉 Indikator:\n{reasons}\n"
+        f"📉 Konfirmasi ({score}):\n{reasons}\n"
         f"📊 RSI: {signal['rsi']:.1f}\n"
+        f"{macd_info}"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {now}"
     )
@@ -145,7 +186,7 @@ async def notify_bot_started(pairs: list[str]) -> bool:
         f"🤖 <b>Bot Trading Aktif!</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Monitoring: {pairs_str}\n"
-        f"⚙️ Strategi: RSI + MA Crossover\n"
+        f"⚙️ Strategi: RSI + MA + MACD + BB + Volume\n"
         f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     return await send_telegram(message)
