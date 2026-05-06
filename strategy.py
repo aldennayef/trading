@@ -669,6 +669,11 @@ class TradingStrategy:
                         f"MA Cross Down (MA{MA_SHORT_PERIOD} < MA{MA_LONG_PERIOD})"
                     )
 
+            # Harga di bawah MA short
+            if current_price < ma_short:
+                sell_score += 1
+                sell_reasons.append("Harga di bawah MA Short (Bearish)")
+
             # MACD
             macd_sell_counted = False
             if macd_histogram is not None and self.prev_macd_histogram is not None:
