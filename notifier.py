@@ -1,6 +1,7 @@
 """
 Telegram Notification Service
 """
+import html
 import logging
 from datetime import datetime, timezone
 
@@ -51,7 +52,7 @@ async def send_telegram(message: str) -> bool:
 async def notify_buy_signal(signal: dict, tp_price: float, cl_price: float) -> bool:
     """Kirim notifikasi sinyal BELI."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    reasons = "\n".join(f"  • {r}" for r in signal["reasons"])
+    reasons = "\n".join(f"  • {html.escape(r)}" for r in signal["reasons"])
     score = signal.get("score", len(signal["reasons"]))
 
     # MACD info
@@ -137,7 +138,7 @@ async def notify_cut_loss(record: dict) -> bool:
 async def notify_sell_signal(signal: dict) -> bool:
     """Kirim notifikasi sinyal JUAL (peringatan)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    reasons = "\n".join(f"  • {r}" for r in signal["reasons"])
+    reasons = "\n".join(f"  • {html.escape(r)}" for r in signal["reasons"])
     score = signal.get("score", len(signal["reasons"]))
 
     # MACD info
