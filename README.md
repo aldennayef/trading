@@ -4,7 +4,7 @@ Bot trading cryptocurrency yang memonitor harga real-time via Binance WebSocket 
 
 ## Fitur
 
-- **Real-time monitoring** 5 pair: BTC, ETH, SOL, DOGE, SHIB (vs USDT)
+- **Real-time monitoring** 8 pair: BTC, ETH, SOL, DOGE, SHIB, TRX, XRP, 1MBABYDOGE (vs USDT)
 - **5 Indikator Teknikal** untuk sinyal yang lebih akurat:
   - RSI (Relative Strength Index)
   - Moving Average Crossover (MA7 vs MA25)

@@ -14,6 +14,9 @@ TRADING_PAIRS = [
     "solusdt",
     "dogeusdt",
     "shibusdt",
+    "trxusdt",
+    "xrpusdt",
+    "1mbabydogeusdt",
 ]
 
 # === Take Profit & Cut Loss (dalam persen) ===
