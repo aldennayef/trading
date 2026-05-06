@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
-from config import LLM_ENABLED, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import LLM_ENABLED, LLM_MODEL, MIN_CONFIDENCE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -125,15 +125,26 @@ def _build_indicator_section(signal: dict) -> str:
 def _build_confidence_section(signal: dict) -> str:
     """Bangun bagian confidence score."""
     confidence = signal.get("confidence", 0)
-    parts = [f"🎯 Confidence: <b>{confidence:.1f}%</b>"]
+    parts = [f"🎯 Confidence: <b>{confidence:.1f}%</b> (min {MIN_CONFIDENCE:.0f}%)"]
 
-    # LLM info
+    # LLM status
+    llm_status = signal.get("llm_status", "disabled")
+    llm_labels = {
+        "disabled": "Nonaktif (LLM_API_KEY kosong)",
+        "not_needed": "Tidak diperlukan (confidence sudah cukup)",
+        "used": "Aktif",
+        "error": "Error (auto-skip)",
+    }
+    status_text = llm_labels.get(llm_status, llm_status)
+    parts.append(f"🤖 LLM: {status_text}")
+
+    # LLM boost detail
     llm_boost = signal.get("llm_boost")
     if llm_boost is not None:
         parts.append(f"🤖 LLM Boost: +{llm_boost:.1f}%")
         llm_reason = signal.get("llm_reason", "")
         if llm_reason:
-            parts.append(f"🤖 LLM: {html.escape(llm_reason[:100])}")
+            parts.append(f"🤖 Analisis: {html.escape(llm_reason[:100])}")
 
     # Indicator scores breakdown
     scores = signal.get("indicator_scores", {})
@@ -252,13 +263,16 @@ async def notify_status(positions: list[dict]) -> bool:
 async def notify_bot_started(pairs: list[str]) -> bool:
     """Kirim notifikasi bot sudah running."""
     pairs_str = ", ".join(p.upper().replace("USDT", "/USDT") for p in pairs)
-    llm_status = "Aktif (boost sinyal)" if LLM_ENABLED else "Nonaktif"
+    if LLM_ENABLED:
+        llm_status = f"Aktif (model: {LLM_MODEL})"
+    else:
+        llm_status = "Nonaktif (set LLM_API_KEY untuk aktifkan)"
     message = (
         f"🤖 <b>Bot Trading Aktif!</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Monitoring: {pairs_str}\n"
         f"⚙️ Strategi: Confidence-Based (10 indikator)\n"
-        f"🎯 Min Confidence: 97%\n"
+        f"🎯 Min Confidence: {MIN_CONFIDENCE:.0f}%\n"
         f"🤖 LLM: {llm_status}\n"
         f"📊 Indikator:\n"
         f"  • Fibonacci Retracement\n"

@@ -73,8 +73,11 @@ async def on_kline_close(
     confidence = signal["confidence"]
 
     # LLM boost (jika aktif dan confidence sudah cukup tinggi)
-    llm_reason = ""
-    if LLM_ENABLED and confidence < MIN_CONFIDENCE:
+    if not LLM_ENABLED:
+        signal["llm_status"] = "disabled"
+    elif confidence >= MIN_CONFIDENCE:
+        signal["llm_status"] = "not_needed"
+    else:
         llm_result = await analyze_with_llm(signal)
         if llm_result is not None:
             boost, llm_reason = llm_result
@@ -82,10 +85,14 @@ async def on_kline_close(
             signal["confidence"] = confidence
             signal["llm_boost"] = boost
             signal["llm_reason"] = llm_reason
+            signal["llm_status"] = "used"
             logger.info(
                 "LLM boost for %s %s: +%.1f%% → %.1f%%",
                 pair, signal["signal"], boost, confidence,
             )
+        else:
+            signal["llm_status"] = "error"
+            logger.warning("LLM error for %s %s, skipping LLM", pair, signal["signal"])
 
     # Cek apakah confidence sudah cukup
     if confidence < MIN_CONFIDENCE:
