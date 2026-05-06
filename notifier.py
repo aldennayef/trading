@@ -81,16 +81,28 @@ async def notify_buy_signal(signal: dict, tp_price: float, cl_price: float) -> b
             vol_info += f" ({ratio:.1f}x avg)"
         vol_info += "\n"
 
+    # Fibonacci info
+    fib_info = ""
+    if signal.get("fib_data") is not None:
+        fib = signal["fib_data"]
+        fib_info = (
+            f"📐 Fib: {_format_price(fib['swing_low'])} - "
+            f"{_format_price(fib['swing_high'])}\n"
+            f"📐 Level: {signal.get('fib_ratio', 0):.3f} = "
+            f"{_format_price(signal.get('fib_level', 0))}\n"
+        )
+
     message = (
-        f"🟢 <b>SINYAL BELI</b> (Skor: {score})\n"
+        f"🟢 <b>SINYAL BELI</b> (Fib + {score} konfirmasi)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Entry: <b>{_format_price(signal['price'])}</b>\n"
         f"🎯 TP: {_format_price(tp_price)}\n"
         f"🔴 CL: {_format_price(cl_price)}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📈 Konfirmasi ({score}):\n{reasons}\n"
+        f"📈 Konfirmasi (Fib + {score}):\n{reasons}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
+        f"📐 Fibonacci:\n{fib_info}"
         f"📉 RSI: {signal['rsi']:.1f}\n"
         f"📊 MA Short: {_format_price(signal['ma_short'])}\n"
         f"📊 MA Long: {_format_price(signal['ma_long'])}\n"
@@ -149,13 +161,26 @@ async def notify_sell_signal(signal: dict) -> bool:
             f"Signal: {signal['macd_signal']:.4f}\n"
         )
 
+    # Fibonacci info
+    fib_info = ""
+    if signal.get("fib_data") is not None:
+        fib = signal["fib_data"]
+        fib_info = (
+            f"📐 Fib: {_format_price(fib['swing_low'])} - "
+            f"{_format_price(fib['swing_high'])}\n"
+            f"📐 Level: {signal.get('fib_ratio', 0):.3f} = "
+            f"{_format_price(signal.get('fib_level', 0))}\n"
+        )
+
     message = (
-        f"⚠️ <b>SINYAL JUAL</b> (Skor: {score})\n"
+        f"⚠️ <b>SINYAL JUAL</b> (Fib + {score} konfirmasi)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Harga: <b>{_format_price(signal['price'])}</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📉 Konfirmasi ({score}):\n{reasons}\n"
+        f"📉 Konfirmasi (Fib + {score}):\n{reasons}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📐 Fibonacci:\n{fib_info}"
         f"📊 RSI: {signal['rsi']:.1f}\n"
         f"{macd_info}"
         f"━━━━━━━━━━━━━━━━━━\n"
@@ -187,7 +212,7 @@ async def notify_bot_started(pairs: list[str]) -> bool:
         f"🤖 <b>Bot Trading Aktif!</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Monitoring: {pairs_str}\n"
-        f"⚙️ Strategi: RSI + MA + MACD + BB + Volume\n"
+        f"⚙️ Strategi: Fibonacci (wajib) + RSI + MA + MACD + BB + Volume\n"
         f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     return await send_telegram(message)

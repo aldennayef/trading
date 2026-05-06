@@ -5,13 +5,14 @@ Bot trading cryptocurrency yang memonitor harga real-time via Binance WebSocket 
 ## Fitur
 
 - **Real-time monitoring** 8 pair: BTC, ETH, SOL, DOGE, SHIB, TRX, XRP, 1MBABYDOGE (vs USDT)
-- **5 Indikator Teknikal** untuk sinyal yang lebih akurat:
+- **Fibonacci Retracement sebagai filter WAJIB** — sinyal hanya muncul saat harga di level Fibonacci
+- **5 Indikator Penguat** untuk konfirmasi:
   - RSI (Relative Strength Index)
   - Moving Average Crossover (MA7 vs MA25)
   - MACD (Moving Average Convergence Divergence)
   - Bollinger Bands
   - Volume Analysis
-- **Minimal 3 konfirmasi** untuk setiap sinyal (mengurangi false signal)
+- **Fibonacci + minimal 2 konfirmasi** untuk setiap sinyal (mengurangi false signal)
 - **Notifikasi Telegram** otomatis untuk sinyal BUY, TP, dan CL
 - **Auto-reconnect** jika koneksi WebSocket terputus
 - **Position tracking** dengan persistensi ke file JSON
@@ -21,8 +22,8 @@ Bot trading cryptocurrency yang memonitor harga real-time via Binance WebSocket 
 
 ```
 main.py              → Entry point & orchestrator
-config.py            → Konfigurasi (pairs, TP/CL, indikator)
-strategy.py          → Strategy engine (RSI + MA + MACD + BB + Volume)
+config.py            → Konfigurasi (pairs, TP/CL, indikator, Fibonacci)
+strategy.py          → Strategy engine (Fibonacci + RSI + MA + MACD + BB + Volume)
 binance_ws.py        → Binance WebSocket client
 position_manager.py  → Tracking posisi aktif & history
 notifier.py          → Telegram notification service
@@ -35,16 +36,22 @@ Binance WebSocket (kline stream + volume)
        │
        ├─→ Candle Close → Strategy Engine
        │                      │
-       │                      ├─→ Hitung 5 Indikator
-       │                      │     • RSI < 30 (oversold)
-       │                      │     • MA Cross Up (MA7 > MA25)
-       │                      │     • MACD Bullish Cross
-       │                      │     • Harga ≤ BB Lower Band
+       │                      ├─→ Fibonacci Retracement (WAJIB)
+       │                      │     • Deteksi swing high/low (30 candle)
+       │                      │     • Hitung level: 0.236, 0.382, 0.500, 0.618, 0.786
+       │                      │     • BUY: harga dekat Fib 0.618/0.786 (support)
+       │                      │     • SELL: harga dekat Fib 0.236/0.382 (resistance)
+       │                      │
+       │                      ├─→ Jika Fibonacci terpenuhi → Cek 5 Indikator Penguat
+       │                      │     • RSI < 30 (oversold) / RSI > 70 (overbought)
+       │                      │     • MA Cross Up/Down (MA7 vs MA25)
+       │                      │     • MACD Bullish/Bearish Cross
+       │                      │     • Harga vs Bollinger Bands
        │                      │     • Volume Spike (≥ 1.5x rata-rata)
        │                      │
-       │                      ├─→ ≥ 3 konfirmasi BUY? → Kirim notif + Buka posisi
+       │                      ├─→ Fib + ≥ 2 konfirmasi BUY? → Kirim notif + Buka posisi
        │                      │
-       │                      └─→ ≥ 3 konfirmasi SELL? → Kirim peringatan
+       │                      └─→ Fib + ≥ 2 konfirmasi SELL? → Kirim peringatan
        │
        └─→ Price Update → Position Manager
                               │
@@ -112,48 +119,67 @@ py main.py
 
 ## Indikator Teknikal
 
-### 1. RSI (Relative Strength Index)
-- **RSI < 30**: Oversold → potensi sinyal beli
-- **RSI > 70**: Overbought → potensi sinyal jual
+### Fibonacci Retracement (WAJIB)
+Fibonacci adalah **syarat wajib** untuk semua sinyal. Tanpa harga berada di level Fibonacci, sinyal **tidak akan dikirim** meskipun semua indikator lain mendukung.
+
+- **Level Support (BUY):** 0.618 (Golden Ratio), 0.786
+  - Harga harus berada dalam **±0.5%** dari level Fibonacci support
+- **Level Resistance (SELL):** 0.236, 0.382
+  - Harga harus berada dalam **±0.5%** dari level Fibonacci resistance
+- **Swing High/Low:** Dideteksi otomatis dari 30 candle terakhir
+- **Level dihitung:** `swing_high - (swing_high - swing_low) × ratio`
+
+### Indikator Penguat
+
+#### 1. RSI (Relative Strength Index)
+- **RSI < 30**: Oversold → konfirmasi beli
+- **RSI > 70**: Overbought → konfirmasi jual
 - Periode: 14
 
-### 2. Moving Average Crossover
-- **MA7 cross di atas MA25**: Sinyal bullish
-- **MA7 cross di bawah MA25**: Sinyal bearish
+#### 2. Moving Average Crossover
+- **MA7 cross di atas MA25**: Konfirmasi bullish
+- **MA7 cross di bawah MA25**: Konfirmasi bearish
 
-### 3. MACD (Moving Average Convergence Divergence)
-- **MACD Bullish Cross**: Histogram dari negatif ke positif → sinyal beli
-- **MACD Bearish Cross**: Histogram dari positif ke negatif → sinyal jual
+#### 3. MACD (Moving Average Convergence Divergence)
+- **MACD Bullish Cross**: Histogram dari negatif ke positif → konfirmasi beli
+- **MACD Bearish Cross**: Histogram dari positif ke negatif → konfirmasi jual
 - Parameter: Fast=12, Slow=26, Signal=9
 
-### 4. Bollinger Bands
-- **Harga ≤ Lower Band**: Oversold → potensi sinyal beli
-- **Harga ≥ Upper Band**: Overbought → potensi sinyal jual
+#### 4. Bollinger Bands
+- **Harga ≤ Lower Band**: Oversold → konfirmasi beli
+- **Harga ≥ Upper Band**: Overbought → konfirmasi jual
 - Periode: 20, Standar Deviasi: 2.0
 
-### 5. Volume Analysis
+#### 5. Volume Analysis
 - **Volume Spike** (≥ 1.5x rata-rata): Konfirmasi kekuatan sinyal
 - Periode MA Volume: 20
 
 ### Konfirmasi Sinyal
-Sinyal BUY/SELL dikirim hanya jika **minimal 3 indikator** mendukung arah yang sama. Semakin tinggi skor konfirmasi, semakin kuat sinyalnya (maks 7).
+Sinyal BUY/SELL dikirim hanya jika:
+1. **Fibonacci terpenuhi** (harga di level support/resistance)
+2. **Minimal 2 indikator penguat** mendukung arah yang sama
+
+Semakin tinggi skor konfirmasi, semakin kuat sinyalnya.
 
 ## Contoh Notifikasi
 
 ```
-🟢 SINYAL BELI (Skor: 4)
+🟢 SINYAL BELI (Fib + 3 konfirmasi)
 ━━━━━━━━━━━━━━━━━━
 📊 Pair: BTCUSDT
 💰 Entry: $97,500.00
 🎯 TP: $100,425.00
 🔴 CL: $95,550.00
 ━━━━━━━━━━━━━━━━━━
-📈 Konfirmasi (4):
+📈 Konfirmasi (Fib + 3):
+  • Fib 0.618 Support ($96,800.00)
   • RSI 28.5 (Oversold < 30)
-  • MA Cross Up (MA7 > MA25)
   • MACD Bullish Cross (Hist: 0.0012)
   • Volume Spike (1250.50 >= 1.5x avg)
 ━━━━━━━━━━━━━━━━━━
+📐 Fibonacci:
+📐 Fib: $95,000.00 - $99,000.00
+📐 Level: 0.618 = $96,528.00
 📉 RSI: 28.5
 📊 MA Short: $97,200.00
 📊 MA Long: $96,800.00

@@ -1,5 +1,5 @@
 """
-Strategy Engine - RSI + MA Crossover + MACD + Bollinger Bands + Volume
+Strategy Engine - Fibonacci Retracement (wajib) + RSI + MA + MACD + BB + Volume
 """
 import math
 from collections import deque
@@ -7,6 +7,11 @@ from collections import deque
 from config import (
     BB_PERIOD,
     BB_STD_DEV,
+    FIB_BUY_LEVELS,
+    FIB_LEVELS,
+    FIB_SELL_LEVELS,
+    FIB_SWING_LOOKBACK,
+    FIB_TOLERANCE,
     KLINE_BUFFER_SIZE,
     MA_LONG_PERIOD,
     MA_SHORT_PERIOD,
@@ -43,6 +48,7 @@ class TradingStrategy:
             MACD_SLOW + MACD_SIGNAL,
             BB_PERIOD,
             VOLUME_MA_PERIOD + 1,
+            FIB_SWING_LOOKBACK,
         )
         return len(self.closes) >= min_needed
 
@@ -114,7 +120,6 @@ class TradingStrategy:
         ema_fast = self._calculate_ema(prices, MACD_FAST)
         ema_slow = self._calculate_ema(prices, MACD_SLOW)
 
-        # Align EMA lengths — EMA slow starts later
         offset = MACD_SLOW - MACD_FAST
         ema_fast_aligned = ema_fast[offset:]
 
@@ -186,22 +191,107 @@ class TradingStrategy:
         return current_vol, avg_vol, is_spike
 
     # =========================================
+    # Indikator: Fibonacci Retracement
+    # =========================================
+
+    def _find_swing_high(self, prices: list[float]) -> float:
+        """Cari swing high (harga tertinggi) dari lookback window."""
+        return max(prices[-FIB_SWING_LOOKBACK:])
+
+    def _find_swing_low(self, prices: list[float]) -> float:
+        """Cari swing low (harga terendah) dari lookback window."""
+        return min(prices[-FIB_SWING_LOOKBACK:])
+
+    def calculate_fibonacci(
+        self,
+    ) -> dict | None:
+        """
+        Hitung level Fibonacci Retracement.
+
+        Fibonacci dihitung dari swing high & swing low pada lookback window.
+        Level = swing_high - (swing_high - swing_low) * fib_ratio
+
+        Returns:
+            dict dengan swing_high, swing_low, levels, nearest_level,
+            nearest_ratio, dan proximity. Atau None jika data kurang.
+        """
+        if len(self.closes) < FIB_SWING_LOOKBACK:
+            return None
+
+        prices = list(self.closes)
+        swing_high = self._find_swing_high(prices)
+        swing_low = self._find_swing_low(prices)
+
+        if swing_high == swing_low:
+            return None
+
+        current_price = prices[-1]
+        price_range = swing_high - swing_low
+
+        levels = {}
+        for ratio in FIB_LEVELS:
+            levels[ratio] = swing_high - price_range * ratio
+
+        nearest_ratio = None
+        nearest_level = None
+        min_distance = float("inf")
+
+        for ratio, level_price in levels.items():
+            distance = abs(current_price - level_price) / current_price
+            if distance < min_distance:
+                min_distance = distance
+                nearest_ratio = ratio
+                nearest_level = level_price
+
+        return {
+            "swing_high": swing_high,
+            "swing_low": swing_low,
+            "levels": levels,
+            "nearest_ratio": nearest_ratio,
+            "nearest_level": nearest_level,
+            "proximity": min_distance,
+        }
+
+    def _is_near_fib_level(
+        self, current_price: float, fib_data: dict, target_levels: list[float]
+    ) -> tuple[bool, float | None, float | None]:
+        """
+        Cek apakah harga dekat dengan salah satu level Fibonacci target.
+
+        Returns:
+            (is_near, nearest_ratio, nearest_level_price)
+        """
+        levels = fib_data["levels"]
+        for ratio in target_levels:
+            if ratio not in levels:
+                continue
+            level_price = levels[ratio]
+            distance = abs(current_price - level_price) / current_price
+            if distance <= FIB_TOLERANCE:
+                return True, ratio, level_price
+
+        return False, None, None
+
+    # =========================================
     # Evaluasi Sinyal
     # =========================================
 
     def evaluate(self) -> dict | None:
         """
-        Evaluasi sinyal trading berdasarkan semua indikator.
+        Evaluasi sinyal trading.
 
-        Indikator yang digunakan:
+        Fibonacci Retracement adalah SYARAT WAJIB:
+        - BUY: Harga harus dekat level Fib support (0.618/0.786)
+        - SELL: Harga harus dekat level Fib resistance (0.236/0.382)
+
+        Setelah Fibonacci terpenuhi, indikator lain sebagai penguat:
         1. RSI — oversold/overbought
         2. MA Crossover — trend direction
         3. MACD — momentum
-        4. Bollinger Bands — volatility & mean reversion
+        4. Bollinger Bands — volatility
         5. Volume — konfirmasi kekuatan
 
-        Butuh minimal MIN_BUY_CONFIRMATIONS / MIN_SELL_CONFIRMATIONS
-        konfirmasi untuk menghasilkan sinyal.
+        Butuh Fibonacci + minimal MIN_BUY/SELL_CONFIRMATIONS indikator lain.
 
         Returns:
             dict dengan sinyal atau None jika tidak ada sinyal.
@@ -215,114 +305,134 @@ class TradingStrategy:
         macd_line, macd_signal, macd_histogram = self.calculate_macd()
         bb_upper, bb_middle, bb_lower = self.calculate_bollinger_bands()
         current_vol, avg_vol, vol_spike = self.calculate_volume_signal()
+        fib_data = self.calculate_fibonacci()
 
         if rsi is None or ma_short is None or ma_long is None:
             return None
 
         current_price = self.closes[-1]
-        reasons = []
 
-        # === Sinyal BELI ===
+        # ===================================================
+        # Fibonacci check (WAJIB) — tanpa ini, tidak ada sinyal
+        # ===================================================
+        fib_buy_ok = False
+        fib_sell_ok = False
+        fib_buy_ratio = None
+        fib_buy_level = None
+        fib_sell_ratio = None
+        fib_sell_level = None
+
+        if fib_data is not None:
+            fib_buy_ok, fib_buy_ratio, fib_buy_level = self._is_near_fib_level(
+                current_price, fib_data, FIB_BUY_LEVELS
+            )
+            fib_sell_ok, fib_sell_ratio, fib_sell_level = self._is_near_fib_level(
+                current_price, fib_data, FIB_SELL_LEVELS
+            )
+
+        # === Sinyal BELI (hanya jika Fibonacci support terpenuhi) ===
         buy_score = 0
+        buy_reasons = []
 
-        # 1. RSI oversold
-        if rsi < RSI_OVERSOLD:
-            buy_score += 1
-            reasons.append(f"RSI {rsi:.1f} (Oversold < {RSI_OVERSOLD})")
-
-        # 2. MA cross up
-        if self.prev_ma_short is not None and self.prev_ma_long is not None:
-            if ma_short > ma_long and self.prev_ma_short <= self.prev_ma_long:
-                buy_score += 1
-                reasons.append(
-                    f"MA Cross Up (MA{MA_SHORT_PERIOD} > MA{MA_LONG_PERIOD})"
-                )
-
-        # 3. Harga di atas MA short (konfirmasi bullish)
-        if current_price > ma_short:
-            buy_score += 1
-            reasons.append("Harga di atas MA Short (Bullish)")
-
-        # 4. MACD: crossover lebih kuat, fallback ke line>signal jika tidak ada crossover
-        macd_buy_counted = False
-        if macd_histogram is not None and self.prev_macd_histogram is not None:
-            if macd_histogram > 0 and self.prev_macd_histogram <= 0:
-                buy_score += 1
-                reasons.append(
-                    f"MACD Bullish Cross (Hist: {macd_histogram:.4f})"
-                )
-                macd_buy_counted = True
-
-        if not macd_buy_counted and macd_line is not None and macd_signal is not None:
-            if macd_line > macd_signal:
-                buy_score += 1
-                reasons.append("MACD Line > Signal (Momentum Bullish)")
-
-        # 6. Harga dekat/di bawah Bollinger lower band (oversold)
-        if bb_lower is not None and current_price <= bb_lower:
-            buy_score += 1
-            reasons.append(
-                f"Harga di bawah BB Lower ({_fmt(current_price)} <= {_fmt(bb_lower)})"
+        if fib_buy_ok:
+            buy_reasons.append(
+                f"Fib {fib_buy_ratio:.3f} Support ({_fmt(fib_buy_level)})"
             )
 
-        # 7. Volume spike (konfirmasi kekuatan)
-        if vol_spike:
-            buy_score += 1
-            reasons.append(
-                f"Volume Spike ({current_vol:.2f} >= {VOLUME_SPIKE_MULTIPLIER}x avg)"
-            )
+            if rsi < RSI_OVERSOLD:
+                buy_score += 1
+                buy_reasons.append(f"RSI {rsi:.1f} (Oversold < {RSI_OVERSOLD})")
 
-        # === Sinyal JUAL ===
+            if self.prev_ma_short is not None and self.prev_ma_long is not None:
+                if ma_short > ma_long and self.prev_ma_short <= self.prev_ma_long:
+                    buy_score += 1
+                    buy_reasons.append(
+                        f"MA Cross Up (MA{MA_SHORT_PERIOD} > MA{MA_LONG_PERIOD})"
+                    )
+
+            if current_price > ma_short:
+                buy_score += 1
+                buy_reasons.append("Harga di atas MA Short (Bullish)")
+
+            macd_buy_counted = False
+            if macd_histogram is not None and self.prev_macd_histogram is not None:
+                if macd_histogram > 0 and self.prev_macd_histogram <= 0:
+                    buy_score += 1
+                    buy_reasons.append(
+                        f"MACD Bullish Cross (Hist: {macd_histogram:.4f})"
+                    )
+                    macd_buy_counted = True
+
+            if not macd_buy_counted and macd_line is not None and macd_signal is not None:
+                if macd_line > macd_signal:
+                    buy_score += 1
+                    buy_reasons.append("MACD Line > Signal (Momentum Bullish)")
+
+            if bb_lower is not None and current_price <= bb_lower:
+                buy_score += 1
+                buy_reasons.append(
+                    f"Harga di bawah BB Lower ({_fmt(current_price)} <= {_fmt(bb_lower)})"
+                )
+
+            if vol_spike:
+                buy_score += 1
+                buy_reasons.append(
+                    f"Volume Spike ({current_vol:.2f} >= {VOLUME_SPIKE_MULTIPLIER}x avg)"
+                )
+
+        # === Sinyal JUAL (hanya jika Fibonacci resistance terpenuhi) ===
         sell_score = 0
         sell_reasons = []
 
-        # 1. RSI overbought
-        if rsi > RSI_OVERBOUGHT:
-            sell_score += 1
-            sell_reasons.append(f"RSI {rsi:.1f} (Overbought > {RSI_OVERBOUGHT})")
-
-        # 2. MA cross down
-        if self.prev_ma_short is not None and self.prev_ma_long is not None:
-            if ma_short < ma_long and self.prev_ma_short >= self.prev_ma_long:
-                sell_score += 1
-                sell_reasons.append(
-                    f"MA Cross Down (MA{MA_SHORT_PERIOD} < MA{MA_LONG_PERIOD})"
-                )
-
-        # 3. MACD: crossover lebih kuat, fallback ke line<signal jika tidak ada crossover
-        macd_sell_counted = False
-        if macd_histogram is not None and self.prev_macd_histogram is not None:
-            if macd_histogram < 0 and self.prev_macd_histogram >= 0:
-                sell_score += 1
-                sell_reasons.append(
-                    f"MACD Bearish Cross (Hist: {macd_histogram:.4f})"
-                )
-                macd_sell_counted = True
-
-        if not macd_sell_counted and macd_line is not None and macd_signal is not None:
-            if macd_line < macd_signal:
-                sell_score += 1
-                sell_reasons.append("MACD Line < Signal (Momentum Bearish)")
-
-        # 5. Harga dekat/di atas Bollinger upper band (overbought)
-        if bb_upper is not None and current_price >= bb_upper:
-            sell_score += 1
+        if fib_sell_ok:
             sell_reasons.append(
-                f"Harga di atas BB Upper ({_fmt(current_price)} >= {_fmt(bb_upper)})"
+                f"Fib {fib_sell_ratio:.3f} Resistance ({_fmt(fib_sell_level)})"
             )
 
-        # 6. Volume spike (konfirmasi kekuatan sell)
-        if vol_spike:
-            sell_score += 1
-            sell_reasons.append(
-                f"Volume Spike ({current_vol:.2f} >= {VOLUME_SPIKE_MULTIPLIER}x avg)"
-            )
+            if rsi > RSI_OVERBOUGHT:
+                sell_score += 1
+                sell_reasons.append(f"RSI {rsi:.1f} (Overbought > {RSI_OVERBOUGHT})")
 
-        # === Tentukan sinyal ===
+            if self.prev_ma_short is not None and self.prev_ma_long is not None:
+                if ma_short < ma_long and self.prev_ma_short >= self.prev_ma_long:
+                    sell_score += 1
+                    sell_reasons.append(
+                        f"MA Cross Down (MA{MA_SHORT_PERIOD} < MA{MA_LONG_PERIOD})"
+                    )
+
+            macd_sell_counted = False
+            if macd_histogram is not None and self.prev_macd_histogram is not None:
+                if macd_histogram < 0 and self.prev_macd_histogram >= 0:
+                    sell_score += 1
+                    sell_reasons.append(
+                        f"MACD Bearish Cross (Hist: {macd_histogram:.4f})"
+                    )
+                    macd_sell_counted = True
+
+            if not macd_sell_counted and macd_line is not None and macd_signal is not None:
+                if macd_line < macd_signal:
+                    sell_score += 1
+                    sell_reasons.append("MACD Line < Signal (Momentum Bearish)")
+
+            if bb_upper is not None and current_price >= bb_upper:
+                sell_score += 1
+                sell_reasons.append(
+                    f"Harga di atas BB Upper ({_fmt(current_price)} >= {_fmt(bb_upper)})"
+                )
+
+            if vol_spike:
+                sell_score += 1
+                sell_reasons.append(
+                    f"Volume Spike ({current_vol:.2f} >= {VOLUME_SPIKE_MULTIPLIER}x avg)"
+                )
+
+        # === Tentukan sinyal (Fibonacci wajib + min konfirmasi indikator lain) ===
         signal = None
-        if buy_score >= MIN_BUY_CONFIRMATIONS:
+        reasons = []
+        if fib_buy_ok and buy_score >= MIN_BUY_CONFIRMATIONS:
             signal = "BUY"
-        elif sell_score >= MIN_SELL_CONFIRMATIONS:
+            reasons = buy_reasons
+        elif fib_sell_ok and sell_score >= MIN_SELL_CONFIRMATIONS:
             signal = "SELL"
             reasons = sell_reasons
 
@@ -348,6 +458,9 @@ class TradingStrategy:
                 "bb_lower": bb_lower,
                 "volume": current_vol,
                 "volume_avg": avg_vol,
+                "fib_data": fib_data,
+                "fib_ratio": fib_buy_ratio if signal == "BUY" else fib_sell_ratio,
+                "fib_level": fib_buy_level if signal == "BUY" else fib_sell_level,
                 "reasons": reasons,
                 "score": buy_score if signal == "BUY" else sell_score,
             }
