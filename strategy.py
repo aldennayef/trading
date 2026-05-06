@@ -42,6 +42,7 @@ class TradingStrategy:
             RSI_PERIOD + 1,
             MACD_SLOW + MACD_SIGNAL,
             BB_PERIOD,
+            VOLUME_MA_PERIOD + 1,
         )
         return len(self.closes) >= min_needed
 
