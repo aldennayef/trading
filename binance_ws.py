@@ -33,7 +33,9 @@ async def fetch_initial_klines(
                     logger.error("Gagal fetch klines %s: %d", pair, resp.status)
                     return []
                 data = await resp.json()
-                closes = [float(candle[4]) for candle in data]
+                # Exclude the last entry (current unclosed candle) to avoid
+                # duplicating it when it later closes via WebSocket.
+                closes = [float(candle[4]) for candle in data[:-1]]
                 logger.info("Fetched %d klines for %s", len(closes), pair.upper())
                 return closes
     except Exception:
