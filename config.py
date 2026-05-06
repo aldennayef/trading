@@ -7,6 +7,13 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# === LLM Configuration (opsional — auto-detect) ===
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_ENABLED = bool(LLM_API_KEY)
+LLM_CONFIDENCE_BOOST = 10  # Maks % boost dari LLM (0-10)
+
 # === Trading Pairs ===
 TRADING_PAIRS = [
     "btcusdt",
@@ -22,6 +29,25 @@ TRADING_PAIRS = [
 # === Take Profit & Cut Loss default (dalam persen, fallback jika ATR tidak tersedia) ===
 TP_PERCENT = float(os.getenv("TP_PERCENT", "3.0"))
 CL_PERCENT = float(os.getenv("CL_PERCENT", "2.0"))
+
+# === Confidence System ===
+MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "97.0"))
+# Pre-threshold: confidence minimal sebelum memanggil LLM (hemat API call)
+CONFIDENCE_PRE_THRESHOLD = MIN_CONFIDENCE - LLM_CONFIDENCE_BOOST  # 87% jika boost=10
+
+# Bobot tiap indikator (total 100 tanpa LLM)
+INDICATOR_WEIGHTS = {
+    "fibonacci": 10,
+    "ema_200": 13,
+    "adx": 11,
+    "stoch_rsi": 10,
+    "rsi": 10,
+    "ma_cross": 9,
+    "macd": 10,
+    "bb": 9,
+    "volume": 10,
+    "price_ma": 8,
+}
 
 # === Indikator RSI ===
 RSI_PERIOD = 14
@@ -70,10 +96,6 @@ FIB_TOLERANCE = 0.005
 FIB_LEVELS = [0.236, 0.382, 0.500, 0.618, 0.786]
 FIB_BUY_LEVELS = [0.618, 0.786]
 FIB_SELL_LEVELS = [0.236, 0.382]
-
-# === Minimum Konfirmasi untuk Sinyal (di atas Fibonacci) ===
-MIN_BUY_CONFIRMATIONS = 2
-MIN_SELL_CONFIRMATIONS = 2
 
 # === Kline/Candlestick Interval ===
 KLINE_INTERVAL = "1m"

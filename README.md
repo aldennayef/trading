@@ -5,20 +5,14 @@ Bot trading cryptocurrency yang memonitor harga real-time via Binance WebSocket 
 ## Fitur
 
 - **Real-time monitoring** 8 pair: BTC, ETH, SOL, DOGE, SHIB, TRX, XRP, 1MBABYDOGE (vs USDT)
-- **Triple Filter System** — sinyal harus melewati 3 gate wajib:
-  1. **Fibonacci Retracement** — harga di level support/resistance
-  2. **EMA 200** — filter trend jangka panjang (BUY hanya di uptrend, SELL hanya di downtrend)
-  3. **ADX ≥ 25** — trend harus cukup kuat (menghindari sinyal di market sideways)
-- **7 Indikator Penguat** untuk konfirmasi:
-  - Stochastic RSI (timing entry presisi)
-  - RSI (Relative Strength Index)
-  - Moving Average Crossover (MA7 vs MA25)
-  - MACD (Moving Average Convergence Divergence)
-  - Bollinger Bands
-  - Volume Analysis
-  - ATR (Average True Range) — TP/CL dinamis berdasarkan volatilitas
-- **Triple Filter + minimal 2 konfirmasi** untuk setiap sinyal
-- **ATR-based TP/CL** — target disesuaikan otomatis per pair berdasarkan volatilitas
+- **Confidence-based scoring** — sinyal hanya dikirim jika confidence ≥ 97%
+- **10 indikator teknikal** (semua opsional, dihitung berbobot):
+  - Fibonacci Retracement, EMA 200, ADX, Stochastic RSI, RSI
+  - MA Crossover, MACD, Bollinger Bands, Volume, Price vs MA
+- **LLM integration (opsional)** — OpenAI-compatible API untuk boost confidence
+  - Auto-detect: jika `LLM_API_KEY` diset → LLM aktif, jika tidak → tetap jalan normal
+  - Custom provider: Groq, Together AI, Ollama, dll via `LLM_BASE_URL`
+- **ATR-based dynamic TP/CL** — target disesuaikan otomatis per pair berdasarkan volatilitas
 - **Notifikasi Telegram** otomatis untuk sinyal BUY, TP, dan CL
 - **Auto-reconnect** jika koneksi WebSocket terputus
 - **Position tracking** dengan persistensi ke file JSON
@@ -27,48 +21,44 @@ Bot trading cryptocurrency yang memonitor harga real-time via Binance WebSocket 
 
 ```
 main.py              → Entry point & orchestrator
-config.py            → Konfigurasi (pairs, indikator, filter)
-strategy.py          → Strategy engine (10 indikator)
+config.py            → Konfigurasi (pairs, indikator, LLM, confidence)
+strategy.py          → Strategy engine (10 indikator, confidence scoring)
+llm_analyzer.py      → LLM integration (OpenAI-compatible)
 binance_ws.py        → Binance WebSocket client (OHLCV)
 position_manager.py  → Tracking posisi aktif & history
 notifier.py          → Telegram notification service
 ```
 
-## Alur Sistem
+## Alur Sinyal
 
 ```
 Binance WebSocket (kline: high, low, close, volume)
        │
        ├─→ Candle Close → Strategy Engine
        │                      │
-       │                      ├─→ Gate 1: Fibonacci Retracement (WAJIB)
-       │                      │     • Deteksi swing high/low (30 candle)
-       │                      │     • BUY: harga dekat Fib 0.618/0.786 (support)
-       │                      │     • SELL: harga dekat Fib 0.236/0.382 (resistance)
+       │                      ├─→ Hitung 10 indikator
+       │                      │     Setiap indikator → skor 0.0-1.0
+       │                      │     Skor × bobot → confidence score
        │                      │
-       │                      ├─→ Gate 2: EMA 200 (WAJIB)
-       │                      │     • BUY: harga di atas EMA 200 (uptrend)
-       │                      │     • SELL: harga di bawah EMA 200 (downtrend)
+       │                      ├─→ Confidence ≥ 87%? (pre-threshold)
+       │                      │     │
+       │                      │     ├─→ Ya + LLM aktif → Kirim ke LLM
+       │                      │     │     LLM return boost 0-10%
+       │                      │     │     Final confidence = tech + LLM boost
+       │                      │     │
+       │                      │     └─→ Tanpa LLM → Langsung cek threshold
        │                      │
-       │                      ├─→ Gate 3: ADX ≥ 25 (WAJIB)
-       │                      │     • Hanya trade saat trend kuat
+       │                      ├─→ Final confidence ≥ 97%?
+       │                      │     │
+       │                      │     ├─→ BUY → ATR TP/CL → Notif + Posisi
+       │                      │     └─→ SELL → Kirim peringatan
        │                      │
-       │                      ├─→ Semua gate lolos → Cek 7 Indikator Penguat
-       │                      │     • Stochastic RSI oversold/overbought
-       │                      │     • RSI < 30 / RSI > 70
-       │                      │     • MA Cross Up/Down
-       │                      │     • MACD Bullish/Bearish
-       │                      │     • Harga vs Bollinger Bands
-       │                      │     • Volume Spike (≥ 1.5x avg)
-       │                      │
-       │                      ├─→ ≥ 2 konfirmasi BUY? → ATR TP/CL → Notif + Buka posisi
-       │                      │
-       │                      └─→ ≥ 2 konfirmasi SELL? → Kirim peringatan
+       │                      └─→ < 97% → Skip (log debug)
        │
        └─→ Price Update → Position Manager
                               │
-                              ├─→ Harga ≥ TP (ATR-based) → Notif Take Profit
-                              └─→ Harga ≤ CL (ATR-based) → Notif Cut Loss
+                              ├─→ Harga ≥ TP → Notif Take Profit
+                              └─→ Harga ≤ CL → Notif Cut Loss
 ```
 
 ## Prasyarat
@@ -76,6 +66,7 @@ Binance WebSocket (kline: high, low, close, volume)
 - Python 3.10+
 - Telegram Bot Token (dari [@BotFather](https://t.me/BotFather))
 - Chat ID Telegram (dari [@userinfobot](https://t.me/userinfobot))
+- (Opsional) API key LLM — OpenAI, Groq, Together AI, dll
 
 ## Instalasi
 
@@ -119,126 +110,116 @@ $env:TELEGRAM_CHAT_ID="your_chat_id"
 py main.py
 ```
 
+### Dengan LLM (opsional)
+```bash
+# Linux/macOS
+export LLM_API_KEY="sk-your-openai-key"
+export LLM_BASE_URL="https://api.openai.com/v1"  # atau Groq, Together, dll
+export LLM_MODEL="gpt-4o-mini"
+python main.py
+
+# Windows PowerShell
+$env:LLM_API_KEY="sk-your-openai-key"
+$env:LLM_BASE_URL="https://api.openai.com/v1"
+$env:LLM_MODEL="gpt-4o-mini"
+py main.py
+```
+
+Bot akan otomatis mendeteksi apakah `LLM_API_KEY` diisi:
+- **Diisi** → LLM aktif, memberikan boost confidence hingga +10%
+- **Kosong** → Bot tetap jalan normal tanpa LLM
+
 ## Konfigurasi
 
 | Variable | Default | Keterangan |
 |----------|---------|------------|
-| `TELEGRAM_BOT_TOKEN` | - | Token bot Telegram |
-| `TELEGRAM_CHAT_ID` | - | Chat ID tujuan notifikasi |
-| `TP_PERCENT` | `3.0` | Take Profit default (fallback jika ATR tidak tersedia) |
-| `CL_PERCENT` | `2.0` | Cut Loss default (fallback jika ATR tidak tersedia) |
+| `TELEGRAM_BOT_TOKEN` | - | Token bot Telegram (wajib) |
+| `TELEGRAM_CHAT_ID` | - | Chat ID tujuan notifikasi (wajib) |
+| `LLM_API_KEY` | - | API key LLM (opsional, kosong = nonaktif) |
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | Base URL provider LLM |
+| `LLM_MODEL` | `gpt-4o-mini` | Model LLM yang digunakan |
+| `MIN_CONFIDENCE` | `97.0` | Minimum confidence (%) untuk mengirim sinyal |
+| `TP_PERCENT` | `3.0` | Take Profit fallback jika ATR tidak tersedia |
+| `CL_PERCENT` | `2.0` | Cut Loss fallback jika ATR tidak tersedia |
 | `LOG_LEVEL` | `INFO` | Level logging |
 
-## Indikator Teknikal
+## Confidence Scoring System
 
-### Gate Wajib (harus semua terpenuhi)
+Setiap indikator memberikan skor **0.0 sampai 1.0** dikalikan **bobot**-nya:
 
-#### 1. Fibonacci Retracement
-Fibonacci adalah **syarat wajib pertama** untuk semua sinyal.
+| Indikator | Bobot | Cara Skor (BUY) | Cara Skor (SELL) |
+|-----------|-------|------------------|------------------|
+| **EMA 200** | 13 | 1.0 jika harga > EMA200 | 1.0 jika harga < EMA200 |
+| **ADX** | 11 | Gradual 0-1 (ADX 15-30) | Gradual 0-1 (ADX 15-30) |
+| **Fibonacci** | 10 | 1.0 jika dekat Fib 0.618/0.786 | 1.0 jika dekat Fib 0.236/0.382 |
+| **Stochastic RSI** | 10 | Gradual (oversold %K 5-50) | Gradual (overbought %K 50-95) |
+| **RSI** | 10 | Gradual (oversold 15-55) | Gradual (overbought 45-85) |
+| **MACD** | 10 | 1.0 MACD > signal + hist > 0 | 1.0 MACD < signal + hist < 0 |
+| **Volume** | 10 | Gradual (0.5x-2x average) | Gradual (0.5x-2x average) |
+| **MA Cross** | 9 | 1.0 fresh cross up, 0.7 above | 1.0 fresh cross down, 0.7 below |
+| **Bollinger** | 9 | 1.0 harga ≤ lower band | 1.0 harga ≥ upper band |
+| **Price vs MA** | 8 | 1.0 harga > MA short | 1.0 harga < MA short |
 
-- **Level Support (BUY):** 0.618 (Golden Ratio), 0.786
-- **Level Resistance (SELL):** 0.236, 0.382
-- **Toleransi:** ±0.5% dari level Fibonacci
-- **Swing High/Low:** Dideteksi otomatis dari 30 candle terakhir
-- **Formula:** `level = swing_high - (swing_high - swing_low) × ratio`
+**Total bobot: 100**
 
-#### 2. EMA 200 (Exponential Moving Average 200)
-Filter trend jangka panjang yang mencegah trading melawan trend besar.
+**Confidence = (Σ skor×bobot) / 100 × 100%**
 
-- **BUY:** Harga harus **di atas** EMA 200 (uptrend confirmed)
-- **SELL:** Harga harus **di bawah** EMA 200 (downtrend confirmed)
-- Mengurangi sinyal palsu saat harga bergerak melawan trend utama
+### Contoh:
+- 10 indikator semua skor 1.0 → confidence 100% → sinyal dikirim
+- 9 indikator skor 1.0, 1 indikator skor 0.5 → confidence ~95% → TIDAK dikirim (< 97%)
+- Semua skor 1.0 + LLM boost 10% → 110% (capped) → dikirim
 
-#### 3. ADX (Average Directional Index)
-Mengukur kekuatan trend. Hanya trade saat trend cukup kuat.
+### LLM Boost:
+- Hanya dipanggil jika confidence ≥ 87% (pre-threshold) dan < 97%
+- LLM menganalisis semua indikator dan memberikan confidence 0-100
+- Boost = LLM confidence × 10% (max +10%)
+- Final = tech confidence + LLM boost
 
-- **ADX ≥ 25:** Trend kuat → sinyal diproses
-- **ADX < 25:** Market sideways → sinyal diabaikan
-- Menggunakan True Range + Directional Movement dari data High/Low/Close
-- Periode: 14
+## Provider LLM yang Didukung
 
-### Indikator Penguat (butuh min 2 dari 7)
+Bot menggunakan OpenAI-compatible API, sehingga bisa digunakan dengan:
 
-#### 1. Stochastic RSI
-Versi RSI yang lebih sensitif untuk timing entry yang presisi.
-
-- **%K < 20:** Oversold → konfirmasi beli
-- **%K > 80:** Overbought → konfirmasi jual
-- Parameter: Period=14, Smooth K=3, Smooth D=3
-
-#### 2. RSI (Relative Strength Index)
-- **RSI < 30:** Oversold → konfirmasi beli
-- **RSI > 70:** Overbought → konfirmasi jual
-- Periode: 14
-
-#### 3. Moving Average Crossover
-- **MA7 cross di atas MA25:** Konfirmasi bullish
-- **MA7 cross di bawah MA25:** Konfirmasi bearish
-
-#### 4. MACD (Moving Average Convergence Divergence)
-- **MACD Bullish Cross:** Histogram negatif → positif → konfirmasi beli
-- **MACD Bearish Cross:** Histogram positif → negatif → konfirmasi jual
-- Parameter: Fast=12, Slow=26, Signal=9
-
-#### 5. Bollinger Bands
-- **Harga ≤ Lower Band:** Oversold → konfirmasi beli
-- **Harga ≥ Upper Band:** Overbought → konfirmasi jual
-- Periode: 20, Standar Deviasi: 2.0
-
-#### 6. Volume Analysis
-- **Volume Spike** (≥ 1.5x rata-rata): Konfirmasi kekuatan sinyal
-- Periode MA Volume: 20
-
-#### 7. ATR (Average True Range) — TP/CL Dinamis
-ATR mengukur volatilitas dan menyesuaikan target TP/CL secara otomatis.
-
-- **TP = Entry + ATR × 2.0** (pair volatile dapat target lebih lebar)
-- **CL = Entry - ATR × 1.5** (stop loss proporsional terhadap volatilitas)
-- Pair volatile (SHIB, DOGE): TP/CL otomatis lebih lebar
-- Pair stabil (BTC, ETH): TP/CL otomatis lebih ketat
-- Periode: 14
-
-### Konfirmasi Sinyal
-Sinyal BUY/SELL dikirim hanya jika:
-1. **Fibonacci terpenuhi** (harga di level support/resistance)
-2. **EMA 200 terpenuhi** (harga searah trend besar)
-3. **ADX ≥ 25** (trend cukup kuat)
-4. **Minimal 2 indikator penguat** mendukung arah yang sama
-
-Semakin tinggi skor konfirmasi, semakin kuat sinyalnya.
+| Provider | Base URL | Model |
+|----------|----------|-------|
+| **OpenAI** | `https://api.openai.com/v1` | `gpt-4o-mini`, `gpt-4o` |
+| **Groq** | `https://api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
+| **Together AI** | `https://api.together.xyz/v1` | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` |
+| **Ollama (lokal)** | `http://localhost:11434/v1` | model lokal apapun |
 
 ## Contoh Notifikasi
 
 ```
-🟢 SINYAL BELI (Fib+ADX+EMA200 + 4 konfirmasi)
+🟢 SINYAL BELI (Confidence: 98.5%)
 ━━━━━━━━━━━━━━━━━━
 📊 Pair: BTCUSDT
 💰 Entry: $97,500.00
 🎯 TP: $98,450.00 (ATR-based)
 🔴 CL: $96,787.50 (ATR-based)
 ━━━━━━━━━━━━━━━━━━
-📈 Konfirmasi:
-  • Fib 0.618 Support ($96,800.00)
+📈 Alasan:
   • EMA 200: $95,200.00 (Harga di atas = Uptrend)
   • ADX 32.5 (Trend Kuat >= 25)
   • Stoch RSI %K 15.3 (Oversold < 20)
   • RSI 28.5 (Oversold < 30)
   • MACD Bullish Cross (Hist: 0.0012)
   • Volume Spike (1250.50 >= 1.5x avg)
+  • Harga di atas MA Short (Bullish)
 ━━━━━━━━━━━━━━━━━━
-📐 Fibonacci:
-📐 Fib: $95,000.00 - $99,000.00
-📐 Level: 0.618 = $96,528.00
-📊 Stoch RSI: %K 15.3 | %D 18.7
-📉 RSI: 28.5
-📊 EMA 200: $95,200.00
-📊 MA Short: $97,200.00
-📊 MA Long: $96,800.00
-📊 MACD: 0.0045 | Signal: 0.0033 | Hist: 0.0012
-📊 BB: Upper $98,500.00 | Lower $96,000.00
-📊 Volume: 1250.50 (1.8x avg)
-📊 ADX: 32.5 | +DI: 28.1 | -DI: 15.3
-📊 ATR: $475.00
+🎯 Confidence: 98.5%
+🤖 LLM Boost: +3.2%
+🤖 LLM: Strong bullish momentum confirmed by multiple indicators
+  █████ ema_200: 100%
+  █████ adx: 100%
+  █████ stoch_rsi: 100%
+  █████ rsi: 100%
+  █████ macd: 100%
+  █████ volume: 100%
+  █████ price_ma: 100%
+  ███░░ ma_cross: 70%
+  ███░░ bb: 60%
+  ░░░░░ fibonacci: 0%
+━━━━━━━━━━━━━━━━━━
+📊 Indikator detail...
 ━━━━━━━━━━━━━━━━━━
 🕐 2026-05-06 08:40 UTC
 ```

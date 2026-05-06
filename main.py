@@ -2,8 +2,7 @@
 Crypto Trading Bot - Entry Point
 
 Bot trading cryptocurrency dengan notifikasi Telegram.
-Menggunakan Fibonacci (wajib) + Stochastic RSI + ADX + ATR + EMA 200
-+ RSI + MA + MACD + Bollinger Bands + Volume.
+Confidence-based scoring (10 indikator) + LLM opsional.
 """
 import asyncio
 import logging
@@ -15,11 +14,14 @@ from config import (
     ATR_CL_MULTIPLIER,
     ATR_TP_MULTIPLIER,
     CL_PERCENT,
+    LLM_ENABLED,
     LOG_LEVEL,
+    MIN_CONFIDENCE,
     SIGNAL_COOLDOWN,
     TP_PERCENT,
     TRADING_PAIRS,
 )
+from llm_analyzer import analyze_with_llm
 from notifier import (
     notify_bot_started,
     notify_buy_signal,
@@ -62,6 +64,31 @@ async def on_kline_close(
     if signal is None:
         return
 
+    confidence = signal["confidence"]
+
+    # LLM boost (jika aktif dan confidence sudah cukup tinggi)
+    llm_reason = ""
+    if LLM_ENABLED and confidence < MIN_CONFIDENCE:
+        llm_result = await analyze_with_llm(signal)
+        if llm_result is not None:
+            boost, llm_reason = llm_result
+            confidence += boost
+            signal["confidence"] = confidence
+            signal["llm_boost"] = boost
+            signal["llm_reason"] = llm_reason
+            logger.info(
+                "LLM boost for %s %s: +%.1f%% → %.1f%%",
+                pair, signal["signal"], boost, confidence,
+            )
+
+    # Cek apakah confidence sudah cukup
+    if confidence < MIN_CONFIDENCE:
+        logger.debug(
+            "Confidence %.1f%% < %.1f%% for %s %s, skip",
+            confidence, MIN_CONFIDENCE, pair, signal["signal"],
+        )
+        return
+
     # Cooldown check
     now = time.time()
     last_time = last_signal_time.get(pair, 0)
@@ -89,15 +116,17 @@ async def on_kline_close(
         await notify_buy_signal(signal, pos.tp_price, pos.cl_price)
         last_signal_time[pair] = now
         logger.info(
-            "BUY signal for %s @ %.8f (score: %d, TP: %.2f%%, CL: %.2f%%)",
-            pair, close_price, signal["score"], tp_pct, cl_pct,
+            "BUY signal for %s @ %.8f (confidence: %.1f%%, TP: %.2f%%, CL: %.2f%%)",
+            pair, close_price, confidence, tp_pct, cl_pct,
         )
 
     elif signal["signal"] == "SELL":
         await notify_sell_signal(signal)
         last_signal_time[pair] = now
-        logger.info("SELL signal for %s @ %.8f (score: %d)",
-                     pair, close_price, signal["score"])
+        logger.info(
+            "SELL signal for %s @ %.8f (confidence: %.1f%%)",
+            pair, close_price, confidence,
+        )
 
 
 async def on_price_update(pair: str, current_price: float) -> None:
@@ -152,9 +181,11 @@ async def main() -> None:
     logger.info("=" * 50)
     logger.info("Crypto Trading Bot Starting...")
     logger.info("Pairs: %s", ", ".join(p.upper() for p in TRADING_PAIRS))
-    logger.info(
-        "Strategy: Fibonacci + StochRSI + ADX + ATR + EMA200 + RSI + MA + MACD + BB + Volume"
-    )
+    logger.info("Strategy: Confidence-Based (10 indikator, min %.0f%%)", MIN_CONFIDENCE)
+    if LLM_ENABLED:
+        logger.info("LLM: Enabled (boost up to %.0f%%)", 10.0)
+    else:
+        logger.info("LLM: Disabled (set LLM_API_KEY to enable)")
     logger.info("=" * 50)
 
     await initialize_strategies()

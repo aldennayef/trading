@@ -1,13 +1,11 @@
-"""
-Telegram Notification Service
-"""
+"""Telegram Notification Service"""
 import html
 import logging
 from datetime import datetime, timezone
 
 import aiohttp
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from config import LLM_ENABLED, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -49,97 +47,128 @@ async def send_telegram(message: str) -> bool:
         return False
 
 
+def _build_indicator_section(signal: dict) -> str:
+    """Bangun bagian detail indikator untuk notifikasi."""
+    parts: list[str] = []
+
+    # Fibonacci
+    if signal.get("fib_data") is not None:
+        fib = signal["fib_data"]
+        parts.append(
+            f"📐 Fib: {_format_price(fib['swing_low'])} - "
+            f"{_format_price(fib['swing_high'])}"
+        )
+        if signal.get("fib_ratio") is not None:
+            parts.append(
+                f"📐 Level: {signal['fib_ratio']:.3f} = "
+                f"{_format_price(signal.get('fib_level', 0))}"
+            )
+
+    # Stochastic RSI
+    if signal.get("stoch_k") is not None:
+        parts.append(
+            f"📊 Stoch RSI: %K {signal['stoch_k']:.1f} | "
+            f"%D {signal['stoch_d']:.1f}"
+        )
+
+    # RSI
+    if signal.get("rsi") is not None:
+        parts.append(f"📉 RSI: {signal['rsi']:.1f}")
+
+    # EMA 200
+    if signal.get("ema_200") is not None:
+        parts.append(f"📊 EMA 200: {_format_price(signal['ema_200'])}")
+
+    # MA
+    if signal.get("ma_short") is not None:
+        parts.append(f"📊 MA Short: {_format_price(signal['ma_short'])}")
+        parts.append(f"📊 MA Long: {_format_price(signal['ma_long'])}")
+
+    # MACD
+    if signal.get("macd_line") is not None:
+        parts.append(
+            f"📊 MACD: {signal['macd_line']:.4f} | "
+            f"Signal: {signal['macd_signal']:.4f} | "
+            f"Hist: {signal['macd_histogram']:.4f}"
+        )
+
+    # BB
+    if signal.get("bb_upper") is not None:
+        parts.append(
+            f"📊 BB: Upper {_format_price(signal['bb_upper'])} | "
+            f"Lower {_format_price(signal['bb_lower'])}"
+        )
+
+    # Volume
+    if signal.get("volume") is not None and signal["volume"]:
+        vol_str = f"📊 Volume: {signal['volume']:.2f}"
+        if signal.get("volume_avg"):
+            ratio = signal["volume"] / signal["volume_avg"]
+            vol_str += f" ({ratio:.1f}x avg)"
+        parts.append(vol_str)
+
+    # ADX
+    if signal.get("adx") is not None:
+        parts.append(
+            f"📊 ADX: {signal['adx']:.1f} | "
+            f"+DI: {signal['plus_di']:.1f} | "
+            f"-DI: {signal['minus_di']:.1f}"
+        )
+
+    # ATR
+    if signal.get("atr") is not None:
+        parts.append(f"📊 ATR: {_format_price(signal['atr'])}")
+
+    return "\n".join(parts)
+
+
+def _build_confidence_section(signal: dict) -> str:
+    """Bangun bagian confidence score."""
+    confidence = signal.get("confidence", 0)
+    parts = [f"🎯 Confidence: <b>{confidence:.1f}%</b>"]
+
+    # LLM info
+    llm_boost = signal.get("llm_boost")
+    if llm_boost is not None:
+        parts.append(f"🤖 LLM Boost: +{llm_boost:.1f}%")
+        llm_reason = signal.get("llm_reason", "")
+        if llm_reason:
+            parts.append(f"🤖 LLM: {html.escape(llm_reason[:100])}")
+
+    # Indicator scores breakdown
+    scores = signal.get("indicator_scores", {})
+    if scores:
+        score_parts = []
+        for name, score in sorted(scores.items(), key=lambda x: -x[1]):
+            bar = "█" * int(score * 5) + "░" * (5 - int(score * 5))
+            score_parts.append(f"  {bar} {name}: {score:.0%}")
+        parts.append("\n".join(score_parts))
+
+    return "\n".join(parts)
+
+
 async def notify_buy_signal(signal: dict, tp_price: float, cl_price: float) -> bool:
     """Kirim notifikasi sinyal BELI."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     reasons = "\n".join(f"  • {html.escape(r)}" for r in signal["reasons"])
-    score = signal.get("score", len(signal["reasons"]))
+    confidence = signal.get("confidence", 0)
 
-    # Fibonacci info
-    fib_info = ""
-    if signal.get("fib_data") is not None:
-        fib = signal["fib_data"]
-        fib_info = (
-            f"📐 Fib: {_format_price(fib['swing_low'])} - "
-            f"{_format_price(fib['swing_high'])}\n"
-            f"📐 Level: {signal.get('fib_ratio', 0):.3f} = "
-            f"{_format_price(signal.get('fib_level', 0))}\n"
-        )
-
-    # Stochastic RSI info
-    stoch_info = ""
-    if signal.get("stoch_k") is not None:
-        stoch_info = (
-            f"📊 Stoch RSI: %K {signal['stoch_k']:.1f} | "
-            f"%D {signal['stoch_d']:.1f}\n"
-        )
-
-    # EMA 200 info
-    ema_info = ""
-    if signal.get("ema_200") is not None:
-        ema_info = f"📊 EMA 200: {_format_price(signal['ema_200'])}\n"
-
-    # MACD info
-    macd_info = ""
-    if signal.get("macd_line") is not None:
-        macd_info = (
-            f"📊 MACD: {signal['macd_line']:.4f} | "
-            f"Signal: {signal['macd_signal']:.4f} | "
-            f"Hist: {signal['macd_histogram']:.4f}\n"
-        )
-
-    # Bollinger Bands info
-    bb_info = ""
-    if signal.get("bb_upper") is not None:
-        bb_info = (
-            f"📊 BB: Upper {_format_price(signal['bb_upper'])} | "
-            f"Lower {_format_price(signal['bb_lower'])}\n"
-        )
-
-    # Volume info
-    vol_info = ""
-    if signal.get("volume") is not None and signal["volume"]:
-        vol_info = f"📊 Volume: {signal['volume']:.2f}"
-        if signal.get("volume_avg"):
-            ratio = signal["volume"] / signal["volume_avg"]
-            vol_info += f" ({ratio:.1f}x avg)"
-        vol_info += "\n"
-
-    # ADX info
-    adx_info = ""
-    if signal.get("adx") is not None:
-        adx_info = (
-            f"📊 ADX: {signal['adx']:.1f} | "
-            f"+DI: {signal['plus_di']:.1f} | "
-            f"-DI: {signal['minus_di']:.1f}\n"
-        )
-
-    # ATR info
-    atr_info = ""
-    if signal.get("atr") is not None:
-        atr_info = f"📊 ATR: {_format_price(signal['atr'])}\n"
+    indicator_section = _build_indicator_section(signal)
+    confidence_section = _build_confidence_section(signal)
 
     message = (
-        f"🟢 <b>SINYAL BELI</b> (Fib+ADX+EMA200 + {score} konfirmasi)\n"
+        f"🟢 <b>SINYAL BELI</b> (Confidence: {confidence:.1f}%)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Entry: <b>{_format_price(signal['price'])}</b>\n"
         f"🎯 TP: {_format_price(tp_price)} (ATR-based)\n"
         f"🔴 CL: {_format_price(cl_price)} (ATR-based)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📈 Konfirmasi:\n{reasons}\n"
+        f"📈 Alasan:\n{reasons}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📐 Fibonacci:\n{fib_info}"
-        f"{stoch_info}"
-        f"📉 RSI: {signal['rsi']:.1f}\n"
-        f"{ema_info}"
-        f"📊 MA Short: {_format_price(signal['ma_short'])}\n"
-        f"📊 MA Long: {_format_price(signal['ma_long'])}\n"
-        f"{macd_info}"
-        f"{bb_info}"
-        f"{vol_info}"
-        f"{adx_info}"
-        f"{atr_info}"
+        f"{confidence_section}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{indicator_section}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {now}"
     )
@@ -182,59 +211,22 @@ async def notify_sell_signal(signal: dict) -> bool:
     """Kirim notifikasi sinyal JUAL (peringatan)."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     reasons = "\n".join(f"  • {html.escape(r)}" for r in signal["reasons"])
-    score = signal.get("score", len(signal["reasons"]))
+    confidence = signal.get("confidence", 0)
 
-    # Fibonacci info
-    fib_info = ""
-    if signal.get("fib_data") is not None:
-        fib = signal["fib_data"]
-        fib_info = (
-            f"📐 Fib: {_format_price(fib['swing_low'])} - "
-            f"{_format_price(fib['swing_high'])}\n"
-            f"📐 Level: {signal.get('fib_ratio', 0):.3f} = "
-            f"{_format_price(signal.get('fib_level', 0))}\n"
-        )
-
-    # Stochastic RSI info
-    stoch_info = ""
-    if signal.get("stoch_k") is not None:
-        stoch_info = (
-            f"📊 Stoch RSI: %K {signal['stoch_k']:.1f} | "
-            f"%D {signal['stoch_d']:.1f}\n"
-        )
-
-    # MACD info
-    macd_info = ""
-    if signal.get("macd_line") is not None:
-        macd_info = (
-            f"📊 MACD: {signal['macd_line']:.4f} | "
-            f"Signal: {signal['macd_signal']:.4f}\n"
-        )
-
-    # ADX info
-    adx_info = ""
-    if signal.get("adx") is not None:
-        adx_info = f"📊 ADX: {signal['adx']:.1f}\n"
-
-    # ATR info
-    atr_info = ""
-    if signal.get("atr") is not None:
-        atr_info = f"📊 ATR: {_format_price(signal['atr'])}\n"
+    indicator_section = _build_indicator_section(signal)
+    confidence_section = _build_confidence_section(signal)
 
     message = (
-        f"⚠️ <b>SINYAL JUAL</b> (Fib+ADX+EMA200 + {score} konfirmasi)\n"
+        f"⚠️ <b>SINYAL JUAL</b> (Confidence: {confidence:.1f}%)\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Pair: <b>{signal['pair']}</b>\n"
         f"💰 Harga: <b>{_format_price(signal['price'])}</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📉 Konfirmasi:\n{reasons}\n"
+        f"📉 Alasan:\n{reasons}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"📐 Fibonacci:\n{fib_info}"
-        f"{stoch_info}"
-        f"📊 RSI: {signal['rsi']:.1f}\n"
-        f"{macd_info}"
-        f"{adx_info}"
-        f"{atr_info}"
+        f"{confidence_section}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{indicator_section}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {now}"
     )
@@ -260,18 +252,20 @@ async def notify_status(positions: list[dict]) -> bool:
 async def notify_bot_started(pairs: list[str]) -> bool:
     """Kirim notifikasi bot sudah running."""
     pairs_str = ", ".join(p.upper().replace("USDT", "/USDT") for p in pairs)
+    llm_status = "Aktif (boost sinyal)" if LLM_ENABLED else "Nonaktif"
     message = (
         f"🤖 <b>Bot Trading Aktif!</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Monitoring: {pairs_str}\n"
-        f"⚙️ Strategi:\n"
-        f"  📐 Fibonacci Retracement (wajib)\n"
-        f"  📊 EMA 200 (filter trend)\n"
-        f"  📊 ADX (kekuatan trend)\n"
-        f"  📊 Stochastic RSI + RSI\n"
-        f"  📊 MA Crossover + MACD\n"
-        f"  📊 Bollinger Bands + Volume\n"
-        f"  📊 ATR (TP/CL dinamis)\n"
+        f"⚙️ Strategi: Confidence-Based (10 indikator)\n"
+        f"🎯 Min Confidence: 97%\n"
+        f"🤖 LLM: {llm_status}\n"
+        f"📊 Indikator:\n"
+        f"  • Fibonacci Retracement\n"
+        f"  • EMA 200 + ADX + ATR\n"
+        f"  • Stochastic RSI + RSI\n"
+        f"  • MA Crossover + MACD\n"
+        f"  • Bollinger Bands + Volume\n"
         f"🕐 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     )
     return await send_telegram(message)
