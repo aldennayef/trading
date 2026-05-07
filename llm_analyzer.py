@@ -14,8 +14,9 @@ SYSTEM_PROMPT = (
     "Analyze the given indicators and provide your confidence (0-100) "
     "that the suggested trading signal is correct. "
     "Consider all indicators holistically. "
-    "Respond with ONLY a valid JSON object: "
-    '{"confidence": <0-100>, "reason": "<brief reason in 1-2 sentences>"}'
+    "You MUST respond with ONLY a JSON object, no other text. "
+    "Do NOT include any explanation, thinking, or markdown. "
+    "Format: {\"confidence\": <number 0-100>, \"reason\": \"<brief reason>\"}"
 )
 
 
@@ -151,7 +152,8 @@ async def analyze_with_llm(signal: dict) -> tuple[float, str] | None:
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
-        "max_tokens": 150,
+        "max_tokens": 200,
+        "response_format": {"type": "json_object"},
     }
 
     try:
@@ -164,7 +166,23 @@ async def analyze_with_llm(signal: dict) -> tuple[float, str] | None:
                     return None
 
                 data = await resp.json()
-                content = data["choices"][0]["message"]["content"].strip()
+                message = data["choices"][0]["message"]
+
+                # DeepSeek thinking models: jawaban bisa di reasoning_content
+                content = (message.get("content") or "").strip()
+                if not content:
+                    content = (message.get("reasoning_content") or "").strip()
+                if not content:
+                    # Coba field lain yang mungkin digunakan provider
+                    content = (message.get("reasoning") or "").strip()
+
+                if not content:
+                    logger.warning(
+                        "LLM returned empty response for %s %s",
+                        signal["pair"], signal["signal"],
+                    )
+                    return None
+
                 result = _extract_json(content)
                 llm_confidence = float(result.get("confidence", 0))
                 reason = str(result.get("reason", ""))
