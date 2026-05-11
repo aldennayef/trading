@@ -2,13 +2,13 @@
 import math
 from collections import deque
 
+import config
 from config import (
     ADX_PERIOD,
     ADX_STRONG_TREND,
     ATR_PERIOD,
     BB_PERIOD,
     BB_STD_DEV,
-    CONFIDENCE_PRE_THRESHOLD,
     EMA_LONG_PERIOD,
     FIB_BUY_LEVELS,
     FIB_LEVELS,
@@ -806,12 +806,12 @@ class TradingStrategy:
         reasons: list[str] = []
         scores: dict[str, float] = {}
 
-        if buy_confidence >= sell_confidence and buy_confidence >= CONFIDENCE_PRE_THRESHOLD:
+        if buy_confidence >= sell_confidence and buy_confidence >= config.CONFIDENCE_PRE_THRESHOLD:
             signal = "BUY"
             confidence = buy_confidence
             reasons = buy_reasons
             scores = buy_scores
-        elif sell_confidence > buy_confidence and sell_confidence >= CONFIDENCE_PRE_THRESHOLD:
+        elif sell_confidence > buy_confidence and sell_confidence >= config.CONFIDENCE_PRE_THRESHOLD:
             signal = "SELL"
             confidence = sell_confidence
             reasons = sell_reasons

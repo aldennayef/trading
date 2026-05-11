@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 import aiohttp
 
-from config import LLM_ENABLED, LLM_MODEL, MIN_CONFIDENCE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+import config
+from config import LLM_MODEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ def _build_indicator_section(signal: dict) -> str:
 def _build_confidence_section(signal: dict) -> str:
     """Bangun bagian confidence score."""
     confidence = signal.get("confidence", 0)
-    parts = [f"🎯 Confidence: <b>{confidence:.1f}%</b> (min {MIN_CONFIDENCE:.0f}%)"]
+    parts = [f"🎯 Confidence: <b>{confidence:.1f}%</b> (min {config.MIN_CONFIDENCE:.0f}%)"]
 
     # LLM status
     llm_status = signal.get("llm_status", "disabled")
@@ -263,7 +264,7 @@ async def notify_status(positions: list[dict]) -> bool:
 async def notify_bot_started(pairs: list[str]) -> bool:
     """Kirim notifikasi bot sudah running."""
     pairs_str = ", ".join(p.upper().replace("USDT", "/USDT") for p in pairs)
-    if LLM_ENABLED:
+    if config.LLM_ENABLED:
         llm_status = f"Aktif (model: {LLM_MODEL})"
     else:
         llm_status = "Nonaktif (set LLM_API_KEY untuk aktifkan)"

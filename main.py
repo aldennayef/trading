@@ -17,13 +17,12 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from binance_ws import connect_websocket, fetch_initial_klines
 from telegram_handler import poll_telegram_updates
+import config
 from config import (
     ATR_CL_MULTIPLIER,
     ATR_TP_MULTIPLIER,
     CL_PERCENT,
-    LLM_ENABLED,
     LOG_LEVEL,
-    MIN_CONFIDENCE,
     SIGNAL_COOLDOWN,
     TP_PERCENT,
     TRADING_PAIRS,
@@ -74,9 +73,9 @@ async def on_kline_close(
     confidence = signal["confidence"]
 
     # LLM boost (jika aktif dan confidence sudah cukup tinggi)
-    if not LLM_ENABLED:
+    if not config.LLM_ENABLED:
         signal["llm_status"] = "disabled"
-    elif confidence >= MIN_CONFIDENCE:
+    elif confidence >= config.MIN_CONFIDENCE:
         signal["llm_status"] = "not_needed"
     else:
         llm_result = await analyze_with_llm(signal)
@@ -96,10 +95,10 @@ async def on_kline_close(
             logger.warning("LLM error for %s %s, skipping LLM", pair, signal["signal"])
 
     # Cek apakah confidence sudah cukup
-    if confidence < MIN_CONFIDENCE:
+    if confidence < config.MIN_CONFIDENCE:
         logger.debug(
             "Confidence %.1f%% < %.1f%% for %s %s, skip",
-            confidence, MIN_CONFIDENCE, pair, signal["signal"],
+            confidence, config.MIN_CONFIDENCE, pair, signal["signal"],
         )
         return
 
@@ -190,8 +189,8 @@ async def main() -> None:
     logger.info("=" * 50)
     logger.info("Crypto Trading Bot Starting...")
     logger.info("Pairs: %s", ", ".join(p.upper() for p in TRADING_PAIRS))
-    logger.info("Strategy: Confidence-Based (10 indikator, min %.0f%%)", MIN_CONFIDENCE)
-    if LLM_ENABLED:
+    logger.info("Strategy: Confidence-Based (10 indikator, min %.0f%%)", config.MIN_CONFIDENCE)
+    if config.LLM_ENABLED:
         logger.info("LLM: Enabled (boost up to %.0f%%)", 10.0)
     else:
         logger.info("LLM: Disabled (set LLM_API_KEY to enable)")

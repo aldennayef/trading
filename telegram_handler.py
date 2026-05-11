@@ -7,12 +7,12 @@ from datetime import datetime, timezone
 import aiohttp
 
 from binance_ws import fetch_initial_klines
+import config
 from config import (
-    KLINE_BUFFER_SIZE,
-    LLM_ENABLED,
-    MIN_CONFIDENCE,
+    LLM_API_KEY,
+    LLM_CONFIDENCE_BOOST,
+    LLM_MODEL,
     TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID,
     TRADING_PAIRS,
 )
 from llm_analyzer import analyze_with_llm
@@ -27,6 +27,9 @@ HISTORY_LIMIT = 720
 
 # Track last update_id for polling
 _last_update_id = 0
+
+# Track users waiting for custom threshold input
+_awaiting_threshold: set[int] = set()
 
 
 def _pair_label(pair: str) -> str:
@@ -83,7 +86,7 @@ async def _answer_callback(callback_query_id: str, text: str = "") -> None:
 
 
 def _build_menu_keyboard() -> dict:
-    """Bangun inline keyboard dengan tombol untuk setiap coin."""
+    """Bangun inline keyboard dengan tombol untuk setiap coin + settings."""
     buttons = []
     row: list[dict] = []
     for pair in TRADING_PAIRS:
@@ -94,6 +97,8 @@ def _build_menu_keyboard() -> dict:
             row = []
     if row:
         buttons.append(row)
+    # Settings button
+    buttons.append([{"text": "⚙️ Settings", "callback_data": "settings:open"}])
     return {"inline_keyboard": buttons}
 
 
@@ -143,9 +148,9 @@ async def _analyze_pair(pair: str) -> dict:
         }
 
     # LLM boost if applicable
-    if not LLM_ENABLED:
+    if not config.LLM_ENABLED:
         signal["llm_status"] = "disabled"
-    elif signal["confidence"] >= MIN_CONFIDENCE:
+    elif signal["confidence"] >= config.MIN_CONFIDENCE:
         signal["llm_status"] = "not_needed"
     else:
         llm_result = await analyze_with_llm(signal)
@@ -207,7 +212,7 @@ def _format_analysis_result(result: dict) -> str:
             f"🎯 Confidence: <b>Di bawah threshold</b>\n"
             f"ℹ️ Tidak ada sinyal kuat BUY atau SELL.\n"
             f"Semua indikator belum memberikan sinyal yang cukup "
-            f"kuat (min {MIN_CONFIDENCE:.0f}%).\n"
+            f"kuat (min {config.MIN_CONFIDENCE:.0f}%).\n"
         )
         return (
             f"{header}"
@@ -279,6 +284,202 @@ async def _handle_analyze_callback(
     )
 
 
+def _build_settings_keyboard() -> dict:
+    """Bangun inline keyboard untuk menu settings."""
+    llm_label = "LLM: ON" if config.LLM_ENABLED else "LLM: OFF"
+    llm_toggle = "llm_off" if config.LLM_ENABLED else "llm_on"
+    buttons = [
+        [{"text": "🎯 Ubah Threshold", "callback_data": "settings:threshold"}],
+        [{"text": f"🤖 {llm_label}", "callback_data": f"settings:{llm_toggle}"}],
+        [{"text": "◀️ Kembali ke Menu", "callback_data": "settings:back"}],
+    ]
+    return {"inline_keyboard": buttons}
+
+
+def _build_threshold_keyboard() -> dict:
+    """Bangun inline keyboard untuk pilih threshold."""
+    current = config.MIN_CONFIDENCE
+    presets = [75.0, 80.0, 85.0, 90.0, 95.0, 97.0]
+    buttons = []
+    row: list[dict] = []
+    for val in presets:
+        label = f"{'✓ ' if val == current else ''}{val:.0f}%"
+        row.append({"text": label, "callback_data": f"threshold:{val}"})
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append(
+        [{"text": "✏️ Input Custom", "callback_data": "threshold:custom"}]
+    )
+    buttons.append(
+        [{"text": "◀️ Kembali ke Settings", "callback_data": "threshold:back"}]
+    )
+    return {"inline_keyboard": buttons}
+
+
+async def _handle_settings_command(chat_id: str | int) -> None:
+    """Kirim menu settings."""
+    llm_status = "Aktif" if config.LLM_ENABLED else "Nonaktif"
+    if config.LLM_ENABLED:
+        llm_detail = f" (model: {LLM_MODEL})"
+    else:
+        llm_detail = ""
+    pre_threshold = config.MIN_CONFIDENCE - LLM_CONFIDENCE_BOOST
+    text = (
+        "⚙️ <b>Settings</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Min Confidence: <b>{config.MIN_CONFIDENCE:.0f}%</b>\n"
+        f"🤖 LLM: <b>{llm_status}</b>{llm_detail}\n"
+        f"📊 Pre-threshold LLM: {pre_threshold:.0f}%\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Pilih opsi di bawah untuk mengubah:"
+    )
+    keyboard = _build_settings_keyboard()
+    await _send_message(chat_id, text, reply_markup=keyboard)
+
+
+async def _handle_threshold_menu(chat_id: str | int, callback_query_id: str) -> None:
+    """Tampilkan menu pilih threshold."""
+    await _answer_callback(callback_query_id)
+    text = (
+        "🎯 <b>Pilih Min Confidence</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"Saat ini: <b>{config.MIN_CONFIDENCE:.0f}%</b>\n\n"
+        "Semakin tinggi → sinyal lebih jarang tapi berkualitas.\n"
+        "Semakin rendah → sinyal lebih sering tapi kurang selektif."
+    )
+    keyboard = _build_threshold_keyboard()
+    await _send_message(chat_id, text, reply_markup=keyboard)
+
+
+async def _handle_set_threshold(
+    chat_id: str | int, callback_query_id: str, value: float
+) -> None:
+    """Set threshold ke nilai tertentu."""
+    old_val = config.MIN_CONFIDENCE
+    config.MIN_CONFIDENCE = value
+    config.CONFIDENCE_PRE_THRESHOLD = value - LLM_CONFIDENCE_BOOST
+    await _answer_callback(callback_query_id, f"Threshold diubah ke {value:.0f}%")
+    logger.info("Threshold changed: %.0f%% → %.0f%%", old_val, value)
+
+    pre_threshold = config.CONFIDENCE_PRE_THRESHOLD
+    text = (
+        "✅ <b>Threshold Diubah!</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Min Confidence: {old_val:.0f}% → <b>{value:.0f}%</b>\n"
+        f"📊 Pre-threshold LLM: <b>{pre_threshold:.0f}%</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ Perubahan berlaku langsung (runtime).\n"
+        "Untuk permanen, ubah MIN_CONFIDENCE di file .env"
+    )
+    await _send_message(chat_id, text)
+    await _handle_settings_command(chat_id)
+
+
+async def _handle_custom_threshold_prompt(
+    chat_id: str | int, callback_query_id: str
+) -> None:
+    """Minta user kirim angka untuk custom threshold."""
+    await _answer_callback(callback_query_id)
+    _awaiting_threshold.add(chat_id)
+    text = (
+        "✏️ <b>Input Custom Threshold</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"Saat ini: <b>{config.MIN_CONFIDENCE:.0f}%</b>\n\n"
+        "Kirim angka antara <b>50</b> dan <b>100</b>.\n"
+        "Contoh: <code>85</code>"
+    )
+    await _send_message(chat_id, text)
+
+
+async def _handle_custom_threshold_input(
+    chat_id: str | int, text: str
+) -> bool:
+    """Handle input teks sebagai custom threshold. Returns True if handled."""
+    if chat_id not in _awaiting_threshold:
+        return False
+
+    _awaiting_threshold.discard(chat_id)
+
+    try:
+        value = float(text.strip().replace("%", ""))
+    except ValueError:
+        await _send_message(
+            chat_id,
+            "❌ Input tidak valid. Kirim angka antara 50-100.\n"
+            "Contoh: <code>85</code>",
+        )
+        return True
+
+    if value < 50 or value > 100:
+        await _send_message(
+            chat_id,
+            "❌ Threshold harus antara <b>50%</b> dan <b>100%</b>.\n"
+            "Contoh: <code>85</code>",
+        )
+        return True
+
+    old_val = config.MIN_CONFIDENCE
+    config.MIN_CONFIDENCE = value
+    config.CONFIDENCE_PRE_THRESHOLD = value - LLM_CONFIDENCE_BOOST
+    logger.info("Custom threshold set: %.0f%% → %.1f%%", old_val, value)
+
+    pre_threshold = config.CONFIDENCE_PRE_THRESHOLD
+    text_msg = (
+        "✅ <b>Threshold Diubah!</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 Min Confidence: {old_val:.0f}% → <b>{value:.1f}%</b>\n"
+        f"📊 Pre-threshold LLM: <b>{pre_threshold:.1f}%</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ Perubahan berlaku langsung (runtime).\n"
+        "Untuk permanen, ubah MIN_CONFIDENCE di file .env"
+    )
+    await _send_message(chat_id, text_msg)
+    await _handle_settings_command(chat_id)
+    return True
+
+
+async def _handle_toggle_llm(
+    chat_id: str | int, callback_query_id: str, enable: bool
+) -> None:
+    """Toggle LLM on/off."""
+    if enable and not LLM_API_KEY:
+        await _answer_callback(callback_query_id, "LLM_API_KEY belum diset!")
+        text = (
+            "❌ <b>Tidak bisa mengaktifkan LLM</b>\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "LLM_API_KEY belum diset di file .env.\n"
+            "Tambahkan API key terlebih dahulu:\n\n"
+            "<code>LLM_API_KEY=sk-your-api-key</code>"
+        )
+        await _send_message(chat_id, text)
+        return
+
+    old_status = "Aktif" if config.LLM_ENABLED else "Nonaktif"
+    config.LLM_ENABLED = enable
+    new_status = "Aktif" if enable else "Nonaktif"
+
+    await _answer_callback(callback_query_id, f"LLM: {new_status}")
+    logger.info("LLM toggled: %s → %s", old_status, new_status)
+
+    text = (
+        f"{'🟢' if enable else '🔴'} <b>LLM {new_status}!</b>\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 Status: {old_status} → <b>{new_status}</b>\n"
+    )
+    if enable:
+        text += f"📊 Model: {LLM_MODEL}\n"
+        text += f"📊 Max Boost: +{LLM_CONFIDENCE_BOOST}%\n"
+    text += (
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ Perubahan berlaku langsung (runtime)."
+    )
+    await _send_message(chat_id, text)
+    await _handle_settings_command(chat_id)
+
+
 async def poll_telegram_updates() -> None:
     """
     Long-polling Telegram updates untuk handle command dan callback.
@@ -314,13 +515,20 @@ async def poll_telegram_updates() -> None:
                 update_id = update["update_id"]
                 _last_update_id = max(_last_update_id, update_id)
 
-                # Handle /menu or /analyze command
+                # Handle text message (commands + custom threshold input)
                 message = update.get("message")
                 if message:
                     text = message.get("text", "")
                     chat_id = message["chat"]["id"]
+
                     if text.lower() in ("/menu", "/analyze", "/start"):
+                        _awaiting_threshold.discard(chat_id)
                         await _handle_menu_command(chat_id)
+                    elif text.lower() == "/settings":
+                        _awaiting_threshold.discard(chat_id)
+                        await _handle_settings_command(chat_id)
+                    elif await _handle_custom_threshold_input(chat_id, text):
+                        pass  # Handled as custom threshold
                     continue
 
                 # Handle callback query (button click)
@@ -333,6 +541,33 @@ async def poll_telegram_updates() -> None:
                     if cb_data.startswith("analyze:"):
                         pair = cb_data.split(":", 1)[1]
                         await _handle_analyze_callback(chat_id, cb_id, pair)
+
+                    elif cb_data == "settings:open":
+                        await _answer_callback(cb_id)
+                        await _handle_settings_command(chat_id)
+
+                    elif cb_data == "settings:threshold":
+                        await _handle_threshold_menu(chat_id, cb_id)
+
+                    elif cb_data == "settings:llm_on":
+                        await _handle_toggle_llm(chat_id, cb_id, enable=True)
+
+                    elif cb_data == "settings:llm_off":
+                        await _handle_toggle_llm(chat_id, cb_id, enable=False)
+
+                    elif cb_data == "settings:back":
+                        await _answer_callback(cb_id)
+                        await _handle_menu_command(chat_id)
+
+                    elif cb_data.startswith("threshold:"):
+                        val = cb_data.split(":", 1)[1]
+                        if val == "custom":
+                            await _handle_custom_threshold_prompt(chat_id, cb_id)
+                        elif val == "back":
+                            await _answer_callback(cb_id)
+                            await _handle_settings_command(chat_id)
+                        else:
+                            await _handle_set_threshold(chat_id, cb_id, float(val))
 
         except asyncio.CancelledError:
             logger.info("Telegram handler cancelled")
