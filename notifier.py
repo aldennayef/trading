@@ -273,7 +273,7 @@ async def notify_bot_started(pairs: list[str]) -> bool:
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 Monitoring: {pairs_str}\n"
         f"⚙️ Strategi: Confidence-Based (10 indikator)\n"
-        f"🎯 Min Confidence: {MIN_CONFIDENCE:.0f}%\n"
+        f"🎯 Min Confidence: {config.MIN_CONFIDENCE:.0f}%\n"
         f"🤖 LLM: {llm_status}\n"
         f"📊 Indikator:\n"
         f"  • Fibonacci Retracement\n"
