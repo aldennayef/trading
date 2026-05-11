@@ -13,6 +13,7 @@ from config import (
     LLM_CONFIDENCE_BOOST,
     LLM_MODEL,
     TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID,
     TRADING_PAIRS,
 )
 from llm_analyzer import analyze_with_llm
@@ -119,14 +120,14 @@ async def _analyze_pair(pair: str) -> dict:
     if not klines:
         return {"error": f"Gagal mengambil data historis untuk {pair_upper}"}
 
-    strategy = TradingStrategy(pair_upper)
+    strategy = TradingStrategy(pair_upper, buffer_size=HISTORY_LIMIT)
     for high, low, close_price, volume in klines:
         strategy.add_price(close_price, volume, high=high, low=low)
 
     if not strategy.ready:
         return {
             "error": f"Data tidak cukup untuk analisis {pair_upper} "
-            f"({len(klines)} candle)"
+            f"({len(strategy.closes)} candle)"
         }
 
     signal = strategy.evaluate()
@@ -134,15 +135,15 @@ async def _analyze_pair(pair: str) -> dict:
     # Get current price from last candle
     last_price = klines[-1][2]  # close price
 
+    actual_candles = len(strategy.closes)
+
     if signal is None:
-        # No signal — confidence too low for both BUY and SELL
-        # Re-evaluate to get raw scores for display
         return {
             "pair": pair_upper,
             "price": last_price,
             "signal": "HOLD",
             "confidence": 0.0,
-            "candles": len(klines),
+            "candles": actual_candles,
             "reasons": ["Tidak ada sinyal kuat — indikator belum sepakat"],
             "indicator_scores": {},
         }
@@ -163,7 +164,7 @@ async def _analyze_pair(pair: str) -> dict:
         else:
             signal["llm_status"] = "error"
 
-    signal["candles"] = len(klines)
+    signal["candles"] = actual_candles
     return signal
 
 
@@ -515,11 +516,26 @@ async def poll_telegram_updates() -> None:
                 update_id = update["update_id"]
                 _last_update_id = max(_last_update_id, update_id)
 
+                # Extract chat_id for auth check
+                msg = update.get("message")
+                cb = update.get("callback_query")
+                if msg:
+                    incoming_chat_id = msg["chat"]["id"]
+                elif cb:
+                    incoming_chat_id = cb["message"]["chat"]["id"]
+                else:
+                    continue
+
+                # Auth: only respond to configured chat_id
+                if TELEGRAM_CHAT_ID and str(incoming_chat_id) != str(TELEGRAM_CHAT_ID):
+                    logger.debug("Ignoring update from unauthorized chat %s", incoming_chat_id)
+                    continue
+
                 # Handle text message (commands + custom threshold input)
                 message = update.get("message")
                 if message:
                     text = message.get("text", "")
-                    chat_id = message["chat"]["id"]
+                    chat_id = incoming_chat_id
 
                     if text.lower() in ("/menu", "/analyze", "/start"):
                         _awaiting_threshold.discard(chat_id)
@@ -535,7 +551,7 @@ async def poll_telegram_updates() -> None:
                 callback = update.get("callback_query")
                 if callback:
                     cb_data = callback.get("data", "")
-                    chat_id = callback["message"]["chat"]["id"]
+                    chat_id = incoming_chat_id
                     cb_id = callback["id"]
 
                     if cb_data.startswith("analyze:"):

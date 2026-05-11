@@ -38,12 +38,12 @@ from config import (
 class TradingStrategy:
     """Menghitung indikator teknikal dan menghasilkan sinyal trading."""
 
-    def __init__(self, pair: str):
+    def __init__(self, pair: str, buffer_size: int = KLINE_BUFFER_SIZE):
         self.pair = pair.upper()
-        self.closes = deque(maxlen=KLINE_BUFFER_SIZE)
-        self.highs = deque(maxlen=KLINE_BUFFER_SIZE)
-        self.lows = deque(maxlen=KLINE_BUFFER_SIZE)
-        self.volumes = deque(maxlen=KLINE_BUFFER_SIZE)
+        self.closes = deque(maxlen=buffer_size)
+        self.highs = deque(maxlen=buffer_size)
+        self.lows = deque(maxlen=buffer_size)
+        self.volumes = deque(maxlen=buffer_size)
         self.prev_ma_short: float | None = None
         self.prev_ma_long: float | None = None
         self.prev_macd_histogram: float | None = None
