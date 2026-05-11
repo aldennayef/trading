@@ -5,6 +5,7 @@ Bot trading cryptocurrency yang memonitor harga real-time via Binance WebSocket 
 ## Fitur
 
 - **Real-time monitoring** 8 pair: BTC, ETH, SOL, DOGE, SHIB, TRX, XRP, 1MBABYDOGE (vs USDT)
+- **Menu analisis on-demand** — pilih coin via tombol Telegram → analisis data 1 bulan → rekomendasi BUY/SELL/HOLD
 - **Confidence-based scoring** — sinyal hanya dikirim jika confidence ≥ 97%
 - **10 indikator teknikal** (semua opsional, dihitung berbobot):
   - Fibonacci Retracement, EMA 200, ADX, Stochastic RSI, RSI
@@ -27,6 +28,7 @@ llm_analyzer.py      → LLM integration (OpenAI-compatible)
 binance_ws.py        → Binance WebSocket client (OHLCV)
 position_manager.py  → Tracking posisi aktif & history
 notifier.py          → Telegram notification service
+telegram_handler.py  → Telegram menu & analisis on-demand
 ```
 
 ## Alur Sinyal
@@ -232,6 +234,40 @@ Bot menggunakan OpenAI-compatible API, sehingga bisa digunakan dengan:
 📊 Indikator detail...
 ━━━━━━━━━━━━━━━━━━
 🕐 2026-05-06 08:40 UTC
+```
+
+## Menu Analisis On-Demand
+
+Kirim `/menu` atau `/analyze` di Telegram untuk melihat menu pilihan coin:
+
+```
+📊 Pilih Coin untuk Analisis
+━━━━━━━━━━━━━━━━━━
+Klik tombol di bawah untuk menganalisis coin.
+
+[BTC/USDT] [ETH/USDT]
+[SOL/USDT] [DOGE/USDT]
+[SHIB/USDT] [TRX/USDT]
+[XRP/USDT] [1MBABYDOGE/USDT]
+```
+
+Setelah klik tombol:
+1. Bot mengambil **720 candle 1H** (~30 hari) dari Binance
+2. Menjalankan **10 indikator teknikal** + LLM (jika aktif)
+3. Memberikan rekomendasi **BUY**, **SELL**, atau **HOLD** dengan confidence score
+
+Contoh hasil analisis:
+```
+🟢 Analisis BTC/USDT
+━━━━━━━━━━━━━━━━━━
+📊 Pair: BTCUSDT
+💰 Harga: $97,500.00
+📅 Data: 719 candle (1H, ~30 hari)
+━━━━━━━━━━━━━━━━━━
+REKOMENDASI: BUY
+━━━━━━━━━━━━━━━━━━
+🎯 Confidence: 92.5% (min 97%)
+...
 ```
 
 ## Disclaimer

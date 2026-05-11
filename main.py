@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from binance_ws import connect_websocket, fetch_initial_klines
+from telegram_handler import poll_telegram_updates
 from config import (
     ATR_CL_MULTIPLIER,
     ATR_TP_MULTIPLIER,
@@ -184,11 +185,6 @@ async def initialize_strategies() -> None:
         )
 
 
-async def handle_telegram_commands() -> None:
-    """Placeholder untuk Telegram command handler."""
-    pass
-
-
 async def main() -> None:
     """Main entry point."""
     logger.info("=" * 50)
@@ -209,11 +205,15 @@ async def main() -> None:
         logger.info("Active positions: %d", len(active_positions))
         await notify_status(active_positions)
 
-    logger.info("Starting WebSocket connection...")
-    await connect_websocket(
-        pairs=TRADING_PAIRS,
-        on_kline_close=on_kline_close,
-        on_price_update=on_price_update,
+    # Run WebSocket + Telegram handler concurrently
+    logger.info("Starting WebSocket + Telegram handler...")
+    await asyncio.gather(
+        connect_websocket(
+            pairs=TRADING_PAIRS,
+            on_kline_close=on_kline_close,
+            on_price_update=on_price_update,
+        ),
+        poll_telegram_updates(),
     )
 
 
